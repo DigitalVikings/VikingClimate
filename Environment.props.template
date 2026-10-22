@@ -1,0 +1,12 @@
+﻿<Project>
+  <PropertyGroup>
+    <!-- Path to your Valheim installation folder containing valheim_Data -->
+    <ValheimPath Condition="'$(ValheimPath)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Valheim</ValheimPath>
+
+    <!-- Active r2modman profile name for automatic test deployment -->
+    <R2ModmanProfile Condition="'$(R2ModmanProfile)' == ''">DEV</R2ModmanProfile>
+
+    <!-- Path where the compiled mod DLL is automatically deployed after building -->
+    <DeployPath>$(APPDATA)\r2modmanPlus-local\Valheim\profiles\$(R2ModmanProfile)\BepInEx\plugins\$(AssemblyName)</DeployPath>
+  </PropertyGroup>
+</Project>

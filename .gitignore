@@ -1,0 +1,21 @@
+﻿# Build outputs
+bin/
+obj/
+dist/
+
+# Local machine environment configuration
+Environment.props
+
+# IDE / Editor configuration
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# OS files
+Thumbs.db
+[Dd]esktop.ini
+.DS_Store

@@ -2,14 +2,12 @@
 
 VikingClimate replaces Valheim's binary environmental triggers with a physically grounded thermodynamic simulation. Internal body warmth, 16-point microclimatic ambient blending, convective wind chill, evaporative wetness, and gear insulation govern player exposure across all biomes, accompanied by non-intrusive sensory immersion and HUD telemetry.
 
-![Thermometer HUD](thermometer_hud.png)
-![Thermal Piece Inspection](thermal_inspection_debug.png)
+![Thermometer HUD](https://raw.githubusercontent.com/DigitalVikings/VikingClimate/main/thermometer_hud.png)
+![Thermal Piece Inspection](https://raw.githubusercontent.com/DigitalVikings/VikingClimate/main/thermal_inspection_debug.png)
 
-> [!WARNING]
-> **Work in Progress (Pre-Release v0.1.0)**: This mod is in active development and has not been tested extensively. Features, balance, and mechanics may change, and unintended bugs or edge cases may occur. Backup your character and world saves before testing.
+> ⚠️ **Work in Progress (Pre-Release v0.1.0)**: This mod is in active development and has not been tested extensively. Features, balance, and mechanics may change, and unintended bugs or edge cases may occur. Backup your character and world saves before testing.
 
-> [!IMPORTANT]
-> **Powered by VikingLib**: This mod requires [VikingLib](https://valheim.thunderstore.io/package/DigitalVikings/VikingLib/). 
+> ⚡ **Powered by VikingLib**: This mod requires [VikingLib](https://valheim.thunderstore.io/package/DigitalVikings/VikingLib/). 
 > VikingLib replaces Valheim's native combat calculation and stat engines. Not all mods may be compatible / work as expected with this.
 
 ---

@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param (
     [string]$Configuration = "Release",
     [switch]$Rebuild,
@@ -98,6 +98,31 @@ if (Test-Path "$userDotNet\dotnet.exe") {
 
 Push-Location $PSScriptRoot
 try {
+    # Synchronize version across manifest.json (Single Source of Truth), .csproj, and src/Plugin.cs
+    $manifestPath = Join-Path $PSScriptRoot "manifest.json"
+    if (Test-Path $manifestPath) {
+        $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+        $syncVersion = $manifest.version_number
+        $csprojPath = Join-Path $PSScriptRoot "VikingClimate.csproj"
+        if (Test-Path $csprojPath) {
+            $csprojRaw = Get-Content $csprojPath -Raw
+            $csprojUpdated = $csprojRaw -replace '<Version>[^<]+</Version>', "<Version>$syncVersion</Version>"
+            if ($csprojRaw -ne $csprojUpdated) {
+                Set-Content -Path $csprojPath -Value $csprojUpdated -NoNewline -Encoding UTF8
+                Write-Host "[VersionSync] Updated VikingClimate.csproj -> v$syncVersion" -ForegroundColor Cyan
+            }
+        }
+        $pluginPath = Join-Path $PSScriptRoot "src\Plugin.cs"
+        if (Test-Path $pluginPath) {
+            $pluginRaw = Get-Content $pluginPath -Raw
+            $pluginUpdated = $pluginRaw -replace 'ModVersion\s*=\s*"[^"]+"', "ModVersion = `"$syncVersion`""
+            if ($pluginRaw -ne $pluginUpdated) {
+                Set-Content -Path $pluginPath -Value $pluginUpdated -NoNewline -Encoding UTF8
+                Write-Host "[VersionSync] Updated src/Plugin.cs -> v$syncVersion" -ForegroundColor Cyan
+            }
+        }
+    }
+
     Write-Host "Building VikingClimate [$Configuration]..." -ForegroundColor Cyan
 
     $buildArgs = @("build", "$PSScriptRoot\VikingClimate.csproj", "-c", $Configuration)
@@ -120,14 +145,21 @@ if ($Package) {
     $manifestPath = Join-Path $PSScriptRoot "manifest.json"
     $iconPath = Join-Path $PSScriptRoot "icon.png"
     $readmePath = Join-Path $PSScriptRoot "README.md"
+    $changelogPath = Join-Path $PSScriptRoot "CHANGELOG.md"
     
     if (-not (Test-Path $manifestPath)) { throw "Missing manifest.json" }
     if (-not (Test-Path $iconPath)) { throw "Missing icon.png" }
     if (-not (Test-Path $readmePath)) { throw "Missing README.md" }
+    if (-not (Test-Path $changelogPath)) { throw "Missing CHANGELOG.md" }
 
     $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
     $version = $manifest.version_number
     $modName = $manifest.name
+
+    $changelogRaw = Get-Content $changelogPath -Raw
+    if ($changelogRaw -notmatch "## \[$([regex]::Escape($version))\]") {
+        throw "CHANGELOG.md is missing an entry header for version [$version] (expected '## [$version] - YYYY-MM-DD')"
+    }
 
     $targetDll = Join-Path $PSScriptRoot "bin\$Configuration\netstandard2.1\$modName.dll"
     $targetPdb = Join-Path $PSScriptRoot "bin\$Configuration\netstandard2.1\$modName.pdb"
@@ -155,12 +187,13 @@ if ($Package) {
     Copy-Item $manifestPath -Destination $stagingDir
     Copy-Item $iconPath -Destination $stagingDir
     Copy-Item $readmePath -Destination $stagingDir
+    Copy-Item $changelogPath -Destination $stagingDir
     Copy-Item $targetDll -Destination $stagingDir
     if (Test-Path $targetPdb) {
         Copy-Item $targetPdb -Destination $stagingDir
     }
 
-        Get-ChildItem -Path $PSScriptRoot -File -Filter "*.png" | Where-Object { $_.Name -ne "icon.png" } | ForEach-Object {
+    Get-ChildItem -Path $PSScriptRoot -File -Filter "*.png" | Where-Object { $_.Name -ne "icon.png" -and $_.Name -ne "icon_raw.png" } | ForEach-Object {
         Copy-Item $_.FullName -Destination $stagingDir
     }
 

@@ -14,7 +14,7 @@ namespace VikingClimate
     {
         public const string ModGuid = "com.digitalvikings.vikingclimate";
         public const string ModName = "VikingClimate";
-        public const string ModVersion = "0.1.0";
+        public const string ModVersion = "0.1.1";
 
         public static VikingClimatePlugin Instance { get; private set; } = null!;
         internal static ManualLogSource Log = null!;

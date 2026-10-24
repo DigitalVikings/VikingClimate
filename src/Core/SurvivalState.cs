@@ -24,6 +24,8 @@ namespace VikingClimate.Core
         public string FireSourceDescription;
         public List<string>? FireSources;
         public bool IsSheltered;
+        public bool IsSubterranean;
+        public float SubterraneanOffset;
         public float RawWindSpeedKmh;
         public bool IsDwellingHeatActive;
         public VikingClimate.Features.Temperature.DwellingThermalProfile? DwellingProfile;

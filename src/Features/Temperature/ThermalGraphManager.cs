@@ -96,6 +96,7 @@ namespace VikingClimate.Features.Temperature
         private float m_cachedStructuralWarmth = 0.0f;
         private ThermalGraphTelemetry m_cachedTelemetry = default;
         private bool m_cachedIsSheltered = false;
+        private bool m_cachedHasDirectRoof = false;
         private float m_cachedEnclosureRatio = 0.0f;
 
         public bool IsPlayerSheltered => m_cachedIsSheltered;
@@ -1090,12 +1091,27 @@ namespace VikingClimate.Features.Temperature
 
             if (player == null) return outdoorAmbient;
 
+            Vector3 chestPos = pos + (Vector3.up * 1.0f);
+            bool nativeShelter = player.InShelter();
+            bool hasDirectRoof = Physics.Raycast(chestPos, Vector3.up, 20.0f, m_pieceLayerMask);
+            bool hasRoof = hasDirectRoof || nativeShelter;
+
+            // Instant exterior detection: If player has neither native shelter nor any structural roof overhead,
+            // they are definitively outdoors. Clear indoor cached values immediately with zero lag.
+            if (!hasRoof)
+            {
+                m_cachedIsSheltered = false;
+                m_cachedStructuralWarmth = 0.0f;
+                m_cachedEnclosureRatio = 0.0f;
+            }
+
             m_samplingTimer += dt;
             float interval = ModConfig.ThermalSamplingInterval != null ? ModConfig.ThermalSamplingInterval.Value : 4.0f;
             float distMoved = Vector3.Distance(pos, m_lastSamplePos);
 
-            // Re-sample when timer expires, or player moves > 2.5m, or shelter state changed, or on initial run
-            bool shelterChanged = (player != null && player.InShelter() != m_cachedIsSheltered);
+            // Re-sample when timer expires, or player moves > 2.5m, or shelter state changed, or direct roof changed, or on initial run
+            bool shelterChanged = (nativeShelter != m_cachedIsSheltered) || (hasDirectRoof != m_cachedHasDirectRoof);
+            m_cachedHasDirectRoof = hasDirectRoof;
             bool needScan = m_samplingTimer >= interval || distMoved > 2.5f || shelterChanged || float.IsPositiveInfinity(m_lastSamplePos.x);
 
             if (needScan)
@@ -1233,7 +1249,8 @@ namespace VikingClimate.Features.Temperature
             m_cachedIsSheltered = (enclosureRatio >= threshold) && (pieceRaysHit >= 12) && hasRoof;
 
             // Structural warmth is the net difference between the integrated field and outdoor air
-            float structuralWarmth = integratedFieldTemp - outdoorAmbient;
+            // strictly restricted to sheltered interiors.
+            float structuralWarmth = m_cachedIsSheltered ? Mathf.Max(0.0f, integratedFieldTemp - outdoorAmbient) : 0.0f;
             float maxFlameWarmth = ModConfig.DirectFlameWarmthMax != null ? ModConfig.DirectFlameWarmthMax.Value : 18.0f;
             directFlameWarmth = Mathf.Clamp(directFlameWarmth, 0.0f, maxFlameWarmth);
 
@@ -1241,7 +1258,7 @@ namespace VikingClimate.Features.Temperature
 
             m_cachedDirectFlame = directFlameWarmth;
             m_cachedStructuralWarmth = structuralWarmth;
-            m_cachedPerceivedTemp = integratedFieldTemp + directFlameWarmth;
+            m_cachedPerceivedTemp = outdoorAmbient + structuralWarmth + directFlameWarmth;
 
             // Populate diagnostic telemetry
             m_cachedTelemetry = new ThermalGraphTelemetry

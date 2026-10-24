@@ -54,8 +54,10 @@ namespace VikingClimate.Features.Temperature
             }
 
             Vector3 pos = player.transform.position;
+            bool inDungeon = player.InInterior();
             bool inShelter = player.InShelter();
             breakdown.IsSheltered = inShelter;
+            breakdown.IsSubterranean = inDungeon;
 
             // 1. Biome Baseline Maximum Temperature (17-point Gaussian kernel blend)
             float baseTemp = SampleBlendedBiomeBaseTemp(pos, out Heightmap.Biome primaryBiome);
@@ -63,38 +65,54 @@ namespace VikingClimate.Features.Temperature
             breakdown.BiomeBaseTemp = baseTemp;
 
             // 2. Subtle Altitude Lapse Rate (-1°C per 35m elevation above sea level y=30)
+            // For dungeons (spawned at y > 3000m), sample the true surface terrain elevation at (x, z)
+            float effectiveY = inDungeon && WorldGenerator.instance != null
+                ? WorldGenerator.instance.GetHeight(pos.x, pos.z)
+                : pos.y;
             float altitudeDelta = 0.0f;
-            if (pos.y > 30.0f)
+            if (effectiveY > 30.0f)
             {
-                altitudeDelta = -Mathf.Max(0.0f, (pos.y - 30.0f) / 35.0f);
+                altitudeDelta = -Mathf.Max(0.0f, (effectiveY - 30.0f) / 35.0f);
+            }
+            if (inDungeon)
+            {
+                altitudeDelta *= 0.50f;
             }
             breakdown.AltitudeDelta = altitudeDelta;
 
-            // 3. Diurnal Time-of-Day Curve (Peak afternoon +4°C, night trough -4°C)
+            // 3. Diurnal Time-of-Day Curve (Peak afternoon +4°C, night trough -4°C; zeroed underground)
             float dayFraction = EnvMan.instance.GetDayFraction();
-            float timeOfDayDelta = 4.0f * Mathf.Sin((dayFraction - 0.25f) * Mathf.PI * 2.0f);
+            float timeOfDayDelta = inDungeon ? 0.0f : (4.0f * Mathf.Sin((dayFraction - 0.25f) * Mathf.PI * 2.0f));
             breakdown.TimeOfDayDelta = timeOfDayDelta;
 
-            // 4. Weather Precipitation & Environment Delta
+            // 4. Weather Precipitation & Environment Delta (isolated underground)
             EnvSetup env = EnvMan.instance.GetCurrentEnvironment();
             string weatherName = env != null ? env.m_name : "Clear";
             breakdown.WeatherName = weatherName;
-            float weatherDelta = GetWeatherDelta(env);
+            float weatherDelta = inDungeon ? 0.0f : GetWeatherDelta(env);
             breakdown.WeatherDelta = weatherDelta;
 
-            // 5. Biome-Scaled Seasonality Mod Synergy
+            // 5. Biome-Scaled Seasonality Mod Synergy (50% dampened underground)
             string seasonName;
             float seasonDelta = GetSeasonDelta(primaryBiome, out seasonName);
+            if (inDungeon)
+            {
+                seasonDelta *= 0.50f;
+            }
             breakdown.SeasonName = seasonName;
             breakdown.SeasonDelta = seasonDelta;
 
-            // 6. Wind Speed (Recorded for convective heat transfer rate; does not alter ambient air temperature)
-            float windIntensity = EnvMan.instance.GetWindIntensity();
+            // 6. Wind Speed (Zeroed in subterranean dungeons)
+            float windIntensity = inDungeon ? 0.0f : EnvMan.instance.GetWindIntensity();
             breakdown.RawWindSpeedKmh = windIntensity * 50.0f;
             breakdown.WindChillDelta = 0.0f;
 
-            // Net Outdoor Ambient Temperature (without dwelling/fire modifications)
-            float outdoorAmbient = baseTemp + altitudeDelta + timeOfDayDelta + weatherDelta + seasonDelta;
+            // Subterranean ground offset (-2.5°C in warm biomes, +3.5°C in freezing biomes)
+            float subterraneanOffset = inDungeon ? GetGroundBiomeOffset(baseTemp) : 0.0f;
+            breakdown.SubterraneanOffset = subterraneanOffset;
+
+            // Net Outdoor / Subterranean Baseline Ambient Temperature (without dwelling/fire modifications)
+            float outdoorAmbient = baseTemp + subterraneanOffset + altitudeDelta + timeOfDayDelta + weatherDelta + seasonDelta;
 
             // Debug World Override: Force ambient outdoor temperature everywhere to a fixed value
             if (VikingClimate.Configuration.ModConfig.DebugFreezeAmbientTemp != null &&
@@ -109,17 +127,19 @@ namespace VikingClimate.Features.Temperature
                 timeOfDayDelta = 0.0f;
                 weatherDelta = 0.0f;
                 seasonDelta = 0.0f;
+                subterraneanOffset = 0.0f;
                 breakdown.BiomeBaseTemp = forcedAmb;
                 breakdown.AltitudeDelta = 0.0f;
                 breakdown.TimeOfDayDelta = 0.0f;
                 breakdown.WeatherDelta = 0.0f;
                 breakdown.SeasonDelta = 0.0f;
+                breakdown.SubterraneanOffset = 0.0f;
             }
 
             breakdown.OutdoorAmbient = outdoorAmbient;
 
-            // 7. Enclosed Structure & Fireplace Heat Convection / Thermal Mass System
-            if (VikingClimate.Configuration.ModConfig.ThermalMassSimulationMode.Value == VikingClimate.Configuration.ThermalMassMode.StructuralGraph)
+            // 7. Enclosed Structure & Fireplace Heat Convection / Thermal Mass System (Surface dwellings only)
+            if (!inDungeon && VikingClimate.Configuration.ModConfig.ThermalMassSimulationMode.Value == VikingClimate.Configuration.ThermalMassMode.StructuralGraph)
             {
                 // Formalized Ground Temperature:
                 // High thermal inertia, dampened altitude & season, no diurnal swing, biome ground offset
@@ -145,20 +165,24 @@ namespace VikingClimate.Features.Temperature
                     out var graphTelemetry
                 );
 
-                bool isSheltered = ThermalGraphManager.Instance.IsPlayerSheltered;
+                bool isSheltered = inShelter || ThermalGraphManager.Instance.IsPlayerSheltered;
                 breakdown.IsSheltered = isSheltered;
 
-                float netDelta = perceivedTemp - outdoorAmbient;
-                breakdown.IsDwellingHeatActive = graphTelemetry.IsActive;
-                breakdown.FireWarmthDelta = netDelta;
-                breakdown.FireSourceDescription = isSheltered ? "Dwelling Thermal Mass" : "Environmental Field";
-                breakdown.FireSources = FormatGraphFireSources(perceivedTemp, directWarmth, structureWarmth, graphTelemetry);
+                if (isSheltered)
+                {
+                    float netDelta = perceivedTemp - outdoorAmbient;
+                    breakdown.IsDwellingHeatActive = graphTelemetry.IsActive;
+                    breakdown.FireWarmthDelta = netDelta;
+                    breakdown.FireSourceDescription = "Dwelling Thermal Mass";
+                    breakdown.FireSources = FormatGraphFireSources(perceivedTemp, directWarmth, structureWarmth, graphTelemetry);
 
-                return perceivedTemp;
+                    return perceivedTemp;
+                }
             }
 
             // Outside shelter with no structural heat, or Fallback mode
-            float fireWarmthDelta = CalculateFireWarmth(player, pos, inShelter, out string fireDesc, out List<string> fireSources);
+            float fireWarmthDelta = CalculateFireWarmth(player, pos, false, out string fireDesc, out List<string> fireSources);
+            breakdown.IsSheltered = false;
             breakdown.IsDwellingHeatActive = false;
             breakdown.FireWarmthDelta = fireWarmthDelta;
             breakdown.FireSourceDescription = fireDesc;

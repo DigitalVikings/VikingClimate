@@ -32,14 +32,7 @@ namespace VikingClimate.Features.Temperature
 
             // 1. Calculate Ambient Feels-Like Temperature and breakdown
             float targetAmbient = AmbientTemperatureCalculator.Calculate(player, dt, out var breakdown);
-            if (ModConfig.DebugFreezeAmbientTemp != null && ModConfig.DebugFreezeAmbientTemp.Value)
-            {
-                state.AmbientTemperature = targetAmbient;
-            }
-            else
-            {
-                state.AmbientTemperature = Mathf.Lerp(state.AmbientTemperature, targetAmbient, dt * 0.5f);
-            }
+            state.AmbientTemperature = targetAmbient;
             state.Breakdown = breakdown;
             state.WindChill = breakdown.WindChillDelta;
             state.FireWarmth = breakdown.FireWarmthDelta;
@@ -83,7 +76,7 @@ namespace VikingClimate.Features.Temperature
 
             // C. Wind Speed & Shelter Multiplier
             float windMult = 1.0f;
-            if (!state.IsInShelter && EnvMan.instance != null)
+            if (!state.IsInShelter && !state.Breakdown.IsSubterranean && EnvMan.instance != null)
             {
                 windMult = 1.0f + (1.2f * EnvMan.instance.GetWindIntensity());
             }
@@ -343,7 +336,11 @@ namespace VikingClimate.Features.Temperature
             sb.AppendLine($"    <color=#A0A0A0>├─ Moisture / Wetness: {wetDesc}</color>");
 
             string windDesc;
-            if (state.IsInShelter)
+            if (bd.IsSubterranean)
+            {
+                windDesc = "<color=#81C784>1.0x (Blocked by Subterranean Cover)</color>";
+            }
+            else if (state.IsInShelter)
             {
                 windDesc = "<color=#81C784>1.0x (Blocked by Shelter)</color>";
             }
@@ -386,20 +383,34 @@ namespace VikingClimate.Features.Temperature
             sb.AppendLine($"• <b>Ambient Feels-Like</b>: <color={feelsColor}>{FormatTemp(state.AmbientTemperature)}</color>");
             sb.AppendLine($"    <color=#A0A0A0>├─ Biome Base ({bd.BiomeName}): {FormatTemp(bd.BiomeBaseTemp)}</color>");
 
-            // Altitude Delta only
-            sb.AppendLine($"    <color=#A0A0A0>├─ Altitude: {FormatTemp(bd.AltitudeDelta)}</color>");
-
-            // Diurnal Time-of-Day Phase
-            string todPhase = bd.TimeOfDayDelta > 0.5f ? "Day" : (bd.TimeOfDayDelta < -0.5f ? "Night" : "Twilight");
-            sb.AppendLine($"    <color=#A0A0A0>├─ Time of Day ({todPhase}): {FormatTemp(bd.TimeOfDayDelta)}</color>");
-
-            // Weather Precipitation
-            sb.AppendLine($"    <color=#A0A0A0>├─ Weather ({bd.WeatherName}): {FormatTemp(bd.WeatherDelta)}</color>");
-
-            // Biome-Scaled Seasonality (only if season mod present)
-            if (bd.SeasonName != "None" && bd.SeasonName != "Default")
+            if (bd.IsSubterranean)
             {
-                sb.AppendLine($"    <color=#A0A0A0>├─ Season ({bd.SeasonName}): {FormatTemp(bd.SeasonDelta)}</color>");
+                sb.AppendLine($"    <color=#A0A0A0>├─ Subterranean Ground Offset: {FormatTemp(bd.SubterraneanOffset)}</color>");
+                sb.AppendLine($"    <color=#A0A0A0>├─ Surface Altitude (50% Dampened): {FormatTemp(bd.AltitudeDelta)}</color>");
+                sb.AppendLine($"    <color=#A0A0A0>├─ Time of Day (Subterranean): +0.0°C</color>");
+                sb.AppendLine($"    <color=#A0A0A0>├─ Weather ({bd.WeatherName}, Subterranean): +0.0°C</color>");
+                if (bd.SeasonName != "None" && bd.SeasonName != "Default")
+                {
+                    sb.AppendLine($"    <color=#A0A0A0>├─ Season ({bd.SeasonName}, 50% Dampened): {FormatTemp(bd.SeasonDelta)}</color>");
+                }
+            }
+            else
+            {
+                // Altitude Delta only
+                sb.AppendLine($"    <color=#A0A0A0>├─ Altitude: {FormatTemp(bd.AltitudeDelta)}</color>");
+
+                // Diurnal Time-of-Day Phase
+                string todPhase = bd.TimeOfDayDelta > 0.5f ? "Day" : (bd.TimeOfDayDelta < -0.5f ? "Night" : "Twilight");
+                sb.AppendLine($"    <color=#A0A0A0>├─ Time of Day ({todPhase}): {FormatTemp(bd.TimeOfDayDelta)}</color>");
+
+                // Weather Precipitation
+                sb.AppendLine($"    <color=#A0A0A0>├─ Weather ({bd.WeatherName}): {FormatTemp(bd.WeatherDelta)}</color>");
+
+                // Biome-Scaled Seasonality (only if season mod present)
+                if (bd.SeasonName != "None" && bd.SeasonName != "Default")
+                {
+                    sb.AppendLine($"    <color=#A0A0A0>├─ Season ({bd.SeasonName}): {FormatTemp(bd.SeasonDelta)}</color>");
+                }
             }
 
             // Heat Radiance & Dwelling Thermal Mass
@@ -425,46 +436,47 @@ namespace VikingClimate.Features.Temperature
                 sb.AppendLine("    <color=#A0A0A0>└─ Radiance & Fire: 0.0°C</color>");
             }
 
-            // 5. Dwelling Comfort & Rested Breakdown
+            // 5. Dwelling Comfort & Rested Breakdown (shown strictly when sheltered inside a surface dwelling)
             if (ModConfig.EnableStructureComfort.Value)
             {
-                var comfortInfo = ThermalGraphManager.Instance.LastComfortInfo;
-                bool isInside = ThermalGraphManager.IsInsideCompound(player);
-                if (comfortInfo.ContributingItems.Count == 0 && isInside)
+                bool isInside = player != null && !player.InInterior() && (player.InShelter() || ThermalGraphManager.IsInsideCompound(player));
+                if (player != null && isInside)
                 {
-                    ThermalGraphManager.Instance.CalculateDwellingComfort(player, true, player.transform.position);
-                }
-
-                if (comfortInfo != null && comfortInfo.InShelter)
-                {
-                    int comfort = comfortInfo.TotalComfort;
-                    sb.AppendLine($"• <b>Dwelling Comfort</b>: <color=yellow>Level {comfort}</color>");
-                    float encPct = ThermalGraphManager.Instance.EnclosureRatio * 100f;
-                    sb.AppendLine($"    <color=#A0A0A0>├─ Base Comfort: +1</color>");
-                    sb.AppendLine($"    <color=#A0A0A0>├─ Enclosed Shelter: +1 ({encPct:F0}% Enclosure)</color>");
-
-                    var items = comfortInfo.ContributingItems;
-                    for (int i = 0; i < items.Count; i++)
+                    var comfortInfo = ThermalGraphManager.Instance.LastComfortInfo;
+                    if (comfortInfo.ContributingItems.Count == 0)
                     {
-                        var item = items[i];
-                        bool isLast = (i == items.Count - 1) && (comfortInfo.RedundantCount == 0);
-                        string branch = isLast ? "└─ " : "├─ ";
-                        string grp = !string.IsNullOrEmpty(item.Group) && item.Group != "None" ? $" (Group: {item.Group})" : "";
-                        sb.AppendLine($"    <color=#80CBC4>{branch}{item.Name}: +{item.Comfort}{grp}</color>");
+                        ThermalGraphManager.Instance.CalculateDwellingComfort(player, true, player.transform.position);
                     }
 
-                    if (comfortInfo.RedundantCount > 0)
+                    if (comfortInfo != null && comfortInfo.InShelter)
                     {
-                        sb.AppendLine($"    <color=#78909C>└─ <i>({comfortInfo.RedundantCount} redundant items omitted by group priority)</i></color>");
+                        int comfort = comfortInfo.TotalComfort;
+                        sb.AppendLine($"• <b>Dwelling Comfort</b>: <color=yellow>Level {comfort}</color>");
+                        float encPct = ThermalGraphManager.Instance.EnclosureRatio * 100f;
+                        sb.AppendLine($"    <color=#A0A0A0>├─ Base Comfort: +1</color>");
+                        sb.AppendLine($"    <color=#A0A0A0>├─ Enclosed Shelter: +1 ({encPct:F0}% Enclosure)</color>");
+
+                        var items = comfortInfo.ContributingItems;
+                        for (int i = 0; i < items.Count; i++)
+                        {
+                            var item = items[i];
+                            bool isLast = (i == items.Count - 1) && (comfortInfo.RedundantCount == 0);
+                            string branch = isLast ? "└─ " : "├─ ";
+                            string grp = !string.IsNullOrEmpty(item.Group) && item.Group != "None" ? $" (Group: {item.Group})" : "";
+                            sb.AppendLine($"    <color=#80CBC4>{branch}{item.Name}: +{item.Comfort}{grp}</color>");
+                        }
+
+                        if (comfortInfo.RedundantCount > 0)
+                        {
+                            sb.AppendLine($"    <color=#78909C>└─ <i>({comfortInfo.RedundantCount} redundant items omitted by group priority)</i></color>");
+                        }
                     }
-                }
-                else
-                {
-                    float encPct = ThermalGraphManager.Instance.EnclosureRatio * 100f;
-                    float reqPct = (ModConfig.EnclosureShelterThreshold != null ? ModConfig.EnclosureShelterThreshold.Value : 0.80f) * 100f;
-                    int wildComfort = (comfortInfo != null && comfortInfo.TotalComfort > 0) ? comfortInfo.TotalComfort : (isInside ? 2 : 1);
-                    string locDesc = isInside ? $"Sheltered ({encPct:F0}% Enclosure, No Comfort Pieces)" : $"Unsheltered / Outdoors ({encPct:F0}% Enclosed / Need {reqPct:F0}%)";
-                    sb.AppendLine($"• <b>Dwelling Comfort</b>: <color=#A0A0A0>Level {wildComfort} ({locDesc})</color>");
+                    else
+                    {
+                        float encPct = ThermalGraphManager.Instance.EnclosureRatio * 100f;
+                        int wildComfort = (comfortInfo != null && comfortInfo.TotalComfort > 0) ? comfortInfo.TotalComfort : 2;
+                        sb.AppendLine($"• <b>Dwelling Comfort</b>: <color=#A0A0A0>Level {wildComfort} (Sheltered, {encPct:F0}% Enclosure, No Comfort Pieces)</color>");
+                    }
                 }
             }
             sb.AppendLine();

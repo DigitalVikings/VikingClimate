@@ -27,7 +27,7 @@ namespace VikingClimate.Patches
                     return true;
                 }
 
-                bool isInside = ThermalGraphManager.IsInsideCompound(player);
+                bool isInside = player.InShelter() || ThermalGraphManager.IsInsideCompound(player);
                 __result = ThermalGraphManager.Instance.CalculateDwellingComfort(player, isInside, player.transform.position);
                 return false;
             }

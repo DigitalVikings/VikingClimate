@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using VikingClimate.Configuration;
 using VikingClimate.Core;
+using VikingClimate.Features.Temperature;
 
 namespace VikingClimate.UI
 {
@@ -47,9 +48,9 @@ namespace VikingClimate.UI
         private const float CavityWidth = ColumnWidth - (CavityInset * 2f); // 28px
         private const float CavityHeight = ColumnHeight - (CavityInset * 2f); // 106px
 
-        // Positioning: Column starts at X = 106 (Center X = 122), Y = 95.8f (Health base)
-        // Perfectly matches the ~14-17px gap between Food and Health columns
-        private const float BaseX = 106f;
+        // Positioning: Column starts at X = 141 (BaseX + 35px), Y = 95.8f (Health base)
+        // Shifted by +35px to comfortably clear Valheim's health bar
+        private const float BaseX = 141f;
         private const float BaseY = 95.8f;
         private const float IconCenterY = 74f; // Matches healthicon Y = 74f
 
@@ -58,10 +59,11 @@ namespace VikingClimate.UI
 
         private Vector2? _vanillaQuickSlotsPos;
 
-        // Temperature Scale: -25°C to +50°C (75°C total span)
-        private const float MinTempScale = -25f;
-        private const float MaxTempScale = 50f;
-        private const float TempRange = MaxTempScale - MinTempScale;
+        // Temperature Scale: Coincides directly with Catastrophic Hypothermia (-12°C) and Scorching (+55°C)
+        // Comfort [18°C, 26°C] sits squarely in the golden center (45% to 57%).
+        private const float MinTempScale = -12.0f;
+        private const float MaxTempScale = 55.0f;
+        private const float TempRange = MaxTempScale - MinTempScale; // 67.0f
 
         public static void AttachToHud(Hud hud)
         {
@@ -102,7 +104,11 @@ namespace VikingClimate.UI
             _canvasGroup.interactable = false;
 
             var whiteSprite = GetWhiteSprite();
-            var iconSprite = GetThermalIconSprite();
+            var iconSprite = ClimateAssetLoader.GetIcon("se_warm") ?? GetThermalIconSprite();
+            var backSprite = ClimateAssetLoader.GetUISprite("thermometer_back");
+            var glassSprite = ClimateAssetLoader.GetUISprite("thermometer_glass");
+            var mercurySprite = ClimateAssetLoader.GetUISprite("thermometer_mercury");
+            var needleSprite = ClimateAssetLoader.GetUISprite("thermometer_needle");
 
             // 1. Root RectTransform positioned as the column frame
             _rootRect.localScale = Vector3.one;
@@ -133,11 +139,11 @@ namespace VikingClimate.UI
             _iconImage.color = new Color(0.51f, 0.78f, 0.52f);
             _iconImage.raycastTarget = false;
 
-            // 3. Column Outer Border (Valheim cylindrical border trim)
+            // 3. Column Outer Border (Valheim bog-oak frame with forged iron end-caps)
             var borderImg = gameObject.AddComponent<Image>();
-            borderImg.sprite = whiteSprite;
+            borderImg.sprite = backSprite ?? whiteSprite;
             borderImg.type = Image.Type.Simple;
-            borderImg.color = new Color(0.18f, 0.16f, 0.14f, 0.95f);
+            borderImg.color = backSprite != null ? Color.white : new Color(0.18f, 0.16f, 0.14f, 0.95f);
             borderImg.raycastTarget = false;
 
             // 4. Inner Dark Cavity
@@ -155,7 +161,7 @@ namespace VikingClimate.UI
             var cavityImg = cavityGo.AddComponent<Image>();
             cavityImg.sprite = whiteSprite;
             cavityImg.type = Image.Type.Simple;
-            cavityImg.color = new Color(0.05f, 0.06f, 0.08f, 0.95f);
+            cavityImg.color = new Color(0.05f, 0.06f, 0.08f, backSprite != null ? 0.65f : 0.95f);
             cavityImg.raycastTarget = false;
 
             // 5. Cylindrical Segment Dividers (matching the HP bar segments)
@@ -189,10 +195,31 @@ namespace VikingClimate.UI
             _bodyFillRect.sizeDelta = new Vector2(0f, 0f);
 
             _bodyFillImage = fillGo.AddComponent<Image>();
-            _bodyFillImage.sprite = whiteSprite;
+            _bodyFillImage.sprite = mercurySprite ?? whiteSprite;
             _bodyFillImage.type = Image.Type.Simple;
             _bodyFillImage.color = new Color(0.51f, 0.78f, 0.52f);
             _bodyFillImage.raycastTarget = false;
+
+            // Glass Overlay Tube
+            if (glassSprite != null)
+            {
+                var glassGo = new GameObject("GlassOverlay", typeof(RectTransform));
+                glassGo.transform.SetParent(cavityGo.transform, false);
+                var glassRect = glassGo.GetComponent<RectTransform>();
+                glassRect.localScale = Vector3.one;
+                glassRect.localRotation = Quaternion.identity;
+                glassRect.anchorMin = Vector2.zero;
+                glassRect.anchorMax = Vector2.one;
+                glassRect.offsetMin = Vector2.zero;
+                glassRect.offsetMax = Vector2.zero;
+                glassRect.pivot = new Vector2(0.5f, 0.5f);
+
+                var glassImg = glassGo.AddComponent<Image>();
+                glassImg.sprite = glassSprite;
+                glassImg.type = Image.Type.Simple;
+                glassImg.color = new Color(1f, 1f, 1f, 0.75f);
+                glassImg.raycastTarget = false;
+            }
 
             // 7. Ambient Target Pointer: [bar]<| (feels like)
             // Attaches to the right edge of the column without intersecting the cavity or numbers
@@ -207,7 +234,7 @@ namespace VikingClimate.UI
             _ambientMarkerRect.sizeDelta = new Vector2(40f, 16f);
             _ambientMarkerRect.anchoredPosition = new Vector2(ColumnWidth, CavityInset + (CavityHeight * 0.5f));
 
-            // Arrow: <| pointing left directly at the thermometer level
+            // Arrow: Forged iron pointer arrow pointing left directly at the thermometer level
             var arrowGo = new GameObject("Arrow", typeof(RectTransform));
             arrowGo.transform.SetParent(indicatorGo.transform, false);
             var arrowRect = arrowGo.GetComponent<RectTransform>();
@@ -216,11 +243,11 @@ namespace VikingClimate.UI
             arrowRect.anchorMin = new Vector2(0f, 0.5f);
             arrowRect.anchorMax = new Vector2(0f, 0.5f);
             arrowRect.pivot = new Vector2(0f, 0.5f);
-            arrowRect.sizeDelta = new Vector2(7f, 9f);
+            arrowRect.sizeDelta = needleSprite != null ? new Vector2(16f, 10f) : new Vector2(7f, 9f);
             arrowRect.anchoredPosition = new Vector2(0f, 0f);
 
             _ambientMarkerImage = arrowGo.AddComponent<Image>();
-            _ambientMarkerImage.sprite = GetArrowSprite();
+            _ambientMarkerImage.sprite = needleSprite ?? GetArrowSprite();
             _ambientMarkerImage.type = Image.Type.Simple;
             _ambientMarkerImage.color = Color.white;
             _ambientMarkerImage.raycastTarget = false;
@@ -408,22 +435,57 @@ namespace VikingClimate.UI
             Color warmthColor = GetTemperatureColor(bodyWarmth);
             float bodyRatio = Mathf.Clamp01((bodyWarmth - MinTempScale) / TempRange);
 
+            bool isCritical = bodyWarmth < MinTempScale || bodyWarmth > MaxTempScale;
+            float flashAlpha = isCritical ? (0.40f + 0.60f * Mathf.Abs(Mathf.Sin(Time.time * 6.0f))) : 1.0f;
+
             if (_bodyFillRect != null)
             {
                 _bodyFillRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, CavityHeight * bodyRatio);
             }
             if (_bodyFillImage != null)
             {
-                _bodyFillImage.color = warmthColor;
+                _bodyFillImage.color = new Color(warmthColor.r, warmthColor.g, warmthColor.b, flashAlpha);
             }
             if (_bodyText != null)
             {
                 _bodyText.text = $"{bodyWarmth:F0}°";
-                _bodyText.color = Color.white;
+                _bodyText.color = isCritical && flashAlpha < 0.7f ? warmthColor : Color.white;
             }
             if (_iconImage != null)
             {
-                _iconImage.color = warmthColor;
+                string? activeTier = TemperatureSystem.EvaluateThermalStatusTier(bodyWarmth);
+                if (activeTier != null)
+                {
+                    string iconName = activeTier switch
+                    {
+                        ThermalStatusEffects.ChillyId => "se_chilly",
+                        ThermalStatusEffects.BitterColdId => "se_bitter_cold",
+                        ThermalStatusEffects.NumbingFrostId => "se_numbing_frost",
+                        ThermalStatusEffects.HypothermiaId => "se_hypothermia",
+                        ThermalStatusEffects.WarmId => "se_warm",
+                        ThermalStatusEffects.HeatExhaustionId => "se_heat_exhaustion",
+                        ThermalStatusEffects.SevereHyperthermiaId => "se_severe_hyperthermia",
+                        ThermalStatusEffects.CatastrophicScorchingId => "se_catastrophic_scorching",
+                        _ => "se_warm"
+                    };
+
+                    var tierIcon = ClimateAssetLoader.GetIcon(iconName);
+                    if (tierIcon != null)
+                    {
+                        _iconImage.sprite = tierIcon;
+                        _iconImage.color = isCritical ? new Color(1f, 1f, 1f, flashAlpha) : Color.white;
+                    }
+                    else
+                    {
+                        _iconImage.color = isCritical ? new Color(warmthColor.r, warmthColor.g, warmthColor.b, flashAlpha) : warmthColor;
+                    }
+                }
+                else
+                {
+                    var comfortIcon = ClimateAssetLoader.GetIcon("se_warm") ?? GetThermalIconSprite();
+                    _iconImage.sprite = comfortIcon;
+                    _iconImage.color = warmthColor;
+                }
             }
 
             // 4. Update Ambient Target Marker (Needle line + sliding degree badge)
@@ -455,11 +517,7 @@ namespace VikingClimate.UI
 
         private static Color GetTemperatureColor(float temp)
         {
-            if (temp < 0.0f) return new Color(0.39f, 0.71f, 0.96f);  // Ice Blue
-            if (temp < 18.0f) return new Color(0.51f, 0.83f, 0.98f); // Cyan Chilly
-            if (temp <= 26.0f) return new Color(0.51f, 0.78f, 0.52f);// Comfort Green
-            if (temp <= 45.0f) return new Color(1.0f, 0.72f, 0.30f); // Warm Amber
-            return new Color(0.90f, 0.45f, 0.45f);                   // Scorching Red
+            return TemperatureSystem.GetTemperatureColor(temp);
         }
 
         private static Sprite GetWhiteSprite()

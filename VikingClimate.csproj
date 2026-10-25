@@ -8,7 +8,7 @@
     <AssemblyName>VikingClimate</AssemblyName>
     <RootNamespace>VikingClimate</RootNamespace>
     <Product>VikingClimate</Product>
-    <Version>0.1.1</Version>
+    <Version>0.1.0</Version>
     <Authors>DigitalVikings</Authors>
     <LangVersion>11</LangVersion>
     <Nullable>enable</Nullable>
@@ -91,11 +91,20 @@
       <HintPath>$(ValheimManagedPath)\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(ValheimManagedPath)\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Jotunn">
       <HintPath Condition="Exists('$(APPDATA)\r2modmanPlus-local\Valheim\profiles\$(R2ModmanProfile)\BepInEx\plugins\ValheimModding-Jotunn\Jotunn.dll')">$(APPDATA)\r2modmanPlus-local\Valheim\profiles\$(R2ModmanProfile)\BepInEx\plugins\ValheimModding-Jotunn\Jotunn.dll</HintPath>
       <HintPath Condition="!Exists('$(APPDATA)\r2modmanPlus-local\Valheim\profiles\$(R2ModmanProfile)\BepInEx\plugins\ValheimModding-Jotunn\Jotunn.dll')">$(APPDATA)\r2modmanPlus-local\Valheim\profiles\DEV\BepInEx\plugins\ValheimModding-Jotunn\Jotunn.dll</HintPath>
       <Private>false</Private>
     </Reference>
+  </ItemGroup>
+
+  <!-- Embedded UI and Status Effect Assets -->
+  <ItemGroup>
+    <EmbeddedResource Include="assets\**\*.png" />
   </ItemGroup>
 
   <!-- Automated Post-Build Deployment -->
@@ -104,9 +113,11 @@
     <ItemGroup>
       <DeployFiles Include="$(TargetPath)" />
       <DeployFiles Include="$(TargetDir)$(TargetName).pdb" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+      <AssetFiles Include="assets\**\*.*" />
     </ItemGroup>
     <Copy SourceFiles="@(DeployFiles)" DestinationFolder="$(DeployPath)" SkipUnchangedFiles="true" />
-    <Message Importance="High" Text="[VikingClimate] Deployed mod files to $(DeployPath)" />
+    <Copy SourceFiles="@(AssetFiles)" DestinationFolder="$(DeployPath)\assets\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="Exists('assets')" />
+    <Message Importance="High" Text="[VikingClimate] Deployed mod files and assets to $(DeployPath)" />
   </Target>
 
 </Project>

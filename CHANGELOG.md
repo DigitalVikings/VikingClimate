@@ -1,12 +1,12 @@
-# Changelog
+﻿# Changelog
 
-## [0.1.1] - 2026-10-24
-### Fixed
-- Fixed dungeons (Burial Chambers, Troll Caves, Sunken Crypts, Frost Caves, Infested Mines) experiencing extreme `-120°C` altitude cold due to Valheim spawning dungeon interiors at `y = 5000m`. Dungeons now evaluate a subterranean ground temperature model anchored to true surface terrain elevation, isolated from surface wind, precipitation, and diurnal swings.
-- Fixed indoor dwelling temperature and Hugin's Compendium telemetry persisting after stepping outside. Exiting shelter now immediately reverts to the outdoor ambient and campfire/torch radiance formula with zero latency.
-- Fixed `RestedRites` duration scaling compatibility by modifying `SE_Cozy` activation delay in-place instead of intercepting `SEMan.AddStatusEffect`.
-- Disabled the thermal inspection overlay camera by default unless debug mode is explicitly enabled.
+All notable changes to **VikingClimate** will be documented in this file.
 
-## [0.1.0] - 2026-10-22
+## [0.1.0] - 2026-10-25
+
 ### Added
-- Initial release of VikingClimate: thermodynamic heat conduction, 64-ray Fibonacci structural enclosure and thermal mass simulation, 17-point Gaussian biome blending, gear cold insulation, and progressive hypothermia/hyperthermia status tiers.
+- **Thermodynamic Climate Engine**: Dynamic microclimates driven by altitude gradients, sun angle, weather patterns, and wind chill.
+- **Directional Thermal Radiation**: Campfires, hearths, and smelters project realistic radiant warmth with raycast shadow occlusion behind walls and obstacles.
+- **Skeuomorphic Mercurial Thermometer**: Handcrafted HUD temperature instrument with fluid mercury display, comfort indicator, and critical temperature flash warnings.
+- **Progressive Thermal Afflictions**: Distinct 9-tier exposure progression from soothing warmth up to dangerous hypothermia and heat exhaustion.
+- **Gear Insulation & Resting Equilibrium**: Armor, fur cloaks, and sheltered dwellings shield against extreme elements and accelerate body temperature recovery while resting.

@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using UnityEngine;
+using VikingClimate.UI;
 using VikingLib.Combat;
 using VikingLib.Stats;
 using VikingLib.StatusEffects;
@@ -53,7 +54,7 @@ namespace VikingClimate.Features.Temperature
             Chilly = StatusEffectBuilder.Create(ChillyId)
                 .WithName("Chilly")
                 .WithTooltip("Goosebumps and shivering chill. Stamina regeneration slightly reduced.")
-                .WithIcon(CreateThermalIcon(new Color(0.6f, 0.85f, 1.0f), "C"))
+                .WithIcon(ResolveIcon("se_chilly", new Color(0.6f, 0.85f, 1.0f), "C"))
                 .WithDuration(0f)
                 .WithMaxStacks(1, StackPolicy.RefreshDurationOnly)
                 .WithIncreasedModifier(CharacterStats.StaminaRegen, -0.15f, "Chilly")
@@ -65,7 +66,7 @@ namespace VikingClimate.Features.Temperature
             BitterCold = StatusEffectBuilder.Create(BitterColdId)
                 .WithName("Bitter Cold")
                 .WithTooltip("Shivering intensely. Striking power and stamina recovery significantly hindered.")
-                .WithIcon(CreateThermalIcon(new Color(0.3f, 0.65f, 1.0f), "C+"))
+                .WithIcon(ResolveIcon("se_bitter_cold", new Color(0.3f, 0.65f, 1.0f), "C+"))
                 .WithDuration(0f)
                 .WithMaxStacks(1, StackPolicy.RefreshDurationOnly)
                 .WithIncreasedModifier(CharacterStats.StaminaRegen, -0.30f, "Bitter Cold")
@@ -77,7 +78,7 @@ namespace VikingClimate.Features.Temperature
             NumbingFrost = StatusEffectBuilder.Create(NumbingFrostId)
                 .WithName("Numbing Frost")
                 .WithTooltip("Extremities stiff and numb. Weapon strikes weakened and stamina regeneration severely penalized.")
-                .WithIcon(CreateThermalIcon(new Color(0.1f, 0.45f, 0.95f), "F"))
+                .WithIcon(ResolveIcon("se_numbing_frost", new Color(0.1f, 0.45f, 0.95f), "F"))
                 .WithDuration(0f)
                 .WithMaxStacks(1, StackPolicy.RefreshDurationOnly)
                 .WithIncreasedModifier(CharacterStats.StaminaRegen, -0.45f, "Numbing Frost")
@@ -90,7 +91,7 @@ namespace VikingClimate.Features.Temperature
             Hypothermia = StatusEffectBuilder.Create(HypothermiaId)
                 .WithName("Hypothermia")
                 .WithTooltip("Catastrophic thermal collapse! Shivering uncontrollably and taking continuous frost damage. Seek fire immediately!")
-                .WithIcon(CreateThermalIcon(new Color(0.05f, 0.25f, 0.8f), "!!"))
+                .WithIcon(ResolveIcon("se_hypothermia", new Color(0.05f, 0.25f, 0.8f), "!!"))
                 .WithDuration(0f)
                 .WithMaxStacks(1, StackPolicy.RefreshDurationOnly)
                 .WithIncreasedModifier(CharacterStats.StaminaRegen, -0.70f, "Hypothermia")
@@ -104,7 +105,7 @@ namespace VikingClimate.Features.Temperature
             Warm = StatusEffectBuilder.Create(WarmId)
                 .WithName("Warm")
                 .WithTooltip("Sweating in the heat. Movement and attack velocity slightly hindered.")
-                .WithIcon(CreateThermalIcon(new Color(1.0f, 0.85f, 0.3f), "W"))
+                .WithIcon(ResolveIcon("se_warm", new Color(1.0f, 0.85f, 0.3f), "W"))
                 .WithDuration(0f)
                 .WithMaxStacks(1, StackPolicy.RefreshDurationOnly)
                 .WithMultiplierModifier(CharacterStats.WalkSpeed, 0.95f, "Warm")
@@ -117,7 +118,7 @@ namespace VikingClimate.Features.Temperature
             HeatExhaustion = StatusEffectBuilder.Create(HeatExhaustionId)
                 .WithName("Heat Exhaustion")
                 .WithTooltip("Heavy limbs and intense sweating. Locomotion and attacks are sluggish.")
-                .WithIcon(CreateThermalIcon(new Color(1.0f, 0.60f, 0.1f), "H"))
+                .WithIcon(ResolveIcon("se_heat_exhaustion", new Color(1.0f, 0.60f, 0.1f), "H"))
                 .WithDuration(0f)
                 .WithMaxStacks(1, StackPolicy.RefreshDurationOnly)
                 .WithMultiplierModifier(CharacterStats.WalkSpeed, 0.80f, "Heat Exhaustion")
@@ -130,7 +131,7 @@ namespace VikingClimate.Features.Temperature
             SevereHyperthermia = StatusEffectBuilder.Create(SevereHyperthermiaId)
                 .WithName("Severe Hyperthermia")
                 .WithTooltip("Dizziness and sweltering exhaustion. Mobility and combat effectiveness heavily reduced.")
-                .WithIcon(CreateThermalIcon(new Color(0.95f, 0.35f, 0.05f), "H+"))
+                .WithIcon(ResolveIcon("se_severe_hyperthermia", new Color(0.95f, 0.35f, 0.05f), "H+"))
                 .WithDuration(0f)
                 .WithMaxStacks(1, StackPolicy.RefreshDurationOnly)
                 .WithMultiplierModifier(CharacterStats.WalkSpeed, 0.65f, "Severe Hyperthermia")
@@ -143,7 +144,7 @@ namespace VikingClimate.Features.Temperature
             CatastrophicScorching = StatusEffectBuilder.Create(CatastrophicScorchingId)
                 .WithName("Catastrophic Scorching")
                 .WithTooltip("Skin blistering in scorching inferno! Taking continuous burn damage. Flee the heat immediately!")
-                .WithIcon(CreateThermalIcon(new Color(0.90f, 0.10f, 0.05f), "!!"))
+                .WithIcon(ResolveIcon("se_catastrophic_scorching", new Color(0.90f, 0.10f, 0.05f), "!!"))
                 .WithDuration(0f)
                 .WithMaxStacks(1, StackPolicy.RefreshDurationOnly)
                 .WithMultiplierModifier(CharacterStats.WalkSpeed, 0.50f, "Catastrophic Scorching")
@@ -153,6 +154,13 @@ namespace VikingClimate.Features.Temperature
                 .BuildAndRegister();
 
             VikingClimatePlugin.Log.LogInfo("Thermal status effects successfully registered via VikingLib.");
+        }
+
+        private static Sprite ResolveIcon(string iconName, Color fallbackColor, string fallbackLabel)
+        {
+            var sprite = ClimateAssetLoader.GetIcon(iconName);
+            if (sprite != null) return sprite;
+            return CreateThermalIcon(fallbackColor, fallbackLabel);
         }
 
         private static Sprite CreateThermalIcon(Color baseColor, string label)

@@ -90,18 +90,34 @@ namespace VikingClimate.Features.Temperature
                 insulationMult = Mathf.Max(0.05f, 1.0f - effectiveInsulation);
             }
 
-            // E. Metabolic Stabilization Multiplier (Fast reversion ONLY when resting; never in the wild)
+            // E. Non-Linear Temperature Delta & Conduction Direction
+            float deltaT = ambientFeelsLike - currentWarmth;
+
+            // F. Metabolic Stabilization Multiplier (Fast reversion ONLY when resting; never in the wild)
             bool isResting = (player.GetSEMan() != null && player.GetSEMan().HaveStatusEffect("Resting".GetStableHashCode())) || player.IsSleeping();
-            bool movingTowardsComfort = Mathf.Abs(ambientFeelsLike - comfortMid) < Mathf.Abs(currentWarmth - comfortMid);
+            bool movingTowardsComfort;
+            if (currentWarmth < comfortMin)
+            {
+                movingTowardsComfort = deltaT > 0f;
+            }
+            else if (currentWarmth > comfortMax)
+            {
+                movingTowardsComfort = deltaT < 0f;
+            }
+            else
+            {
+                movingTowardsComfort = (ambientFeelsLike >= comfortMin && ambientFeelsLike <= comfortMax)
+                    || Mathf.Abs((currentWarmth + deltaT) - comfortMid) < Mathf.Abs(currentWarmth - comfortMid);
+            }
+
             bool isReverting = isResting && movingTowardsComfort;
             float metabolicMult = isReverting ? ModConfig.ReversionSpeedMultiplier.Value : 1.0f;
 
-            // F. Unit-Interval Clamped Conduction Rate
+            // G. Unit-Interval Clamped Conduction Rate
             float rawRate = baseRate * wetMult * windMult * insulationMult * metabolicMult;
             float rate = Mathf.Clamp01(rawRate);
 
-            // G. Non-Linear Differential Step Integration
-            float deltaT = ambientFeelsLike - currentWarmth;
+            // H. Non-Linear Differential Step Integration
             float absDelta = Mathf.Abs(deltaT);
             float velocity = 0.0f;
 
@@ -143,85 +159,33 @@ namespace VikingClimate.Features.Temperature
             UpdateThermalStatusTier(player, currentWarmth, dt);
         }
 
+        public static string? EvaluateThermalStatusTier(float warmth)
+        {
+            float minComfort = ModConfig.ComfortMinTemp.Value;
+            float maxComfort = ModConfig.ComfortMaxTemp.Value;
+
+            if (warmth < minComfort)
+            {
+                if (warmth < -12.0f) return ThermalStatusEffects.HypothermiaId;
+                if (warmth < 0.0f) return ThermalStatusEffects.NumbingFrostId;
+                if (warmth < 8.0f) return ThermalStatusEffects.BitterColdId;
+                return ThermalStatusEffects.ChillyId;
+            }
+
+            if (warmth > maxComfort)
+            {
+                if (warmth > 55.0f) return ThermalStatusEffects.CatastrophicScorchingId;
+                if (warmth > 45.0f) return ThermalStatusEffects.SevereHyperthermiaId;
+                if (warmth > 35.0f) return ThermalStatusEffects.HeatExhaustionId;
+                return ThermalStatusEffects.WarmId;
+            }
+
+            return null; // Comfort zone
+        }
+
         private static void UpdateThermalStatusTier(Player player, float warmth, float dt)
         {
-            string? targetStatusId = null;
-
-            // Hysteresis buffers (prevents rapid on/off fluttering when near tier boundaries)
-            if (_currentActiveStatusId == ThermalStatusEffects.HypothermiaId)
-            {
-                if (warmth < -11.0f) targetStatusId = ThermalStatusEffects.HypothermiaId;
-                else if (warmth < 0.5f) targetStatusId = ThermalStatusEffects.NumbingFrostId;
-                else if (warmth < 8.5f) targetStatusId = ThermalStatusEffects.BitterColdId;
-                else if (warmth < 18.5f) targetStatusId = ThermalStatusEffects.ChillyId;
-            }
-            else if (_currentActiveStatusId == ThermalStatusEffects.NumbingFrostId)
-            {
-                if (warmth < -12.5f) targetStatusId = ThermalStatusEffects.HypothermiaId;
-                else if (warmth < 0.5f) targetStatusId = ThermalStatusEffects.NumbingFrostId;
-                else if (warmth < 8.5f) targetStatusId = ThermalStatusEffects.BitterColdId;
-                else if (warmth < 18.5f) targetStatusId = ThermalStatusEffects.ChillyId;
-            }
-            else if (_currentActiveStatusId == ThermalStatusEffects.BitterColdId)
-            {
-                if (warmth < -12.5f) targetStatusId = ThermalStatusEffects.HypothermiaId;
-                else if (warmth < -0.5f) targetStatusId = ThermalStatusEffects.NumbingFrostId;
-                else if (warmth < 8.5f) targetStatusId = ThermalStatusEffects.BitterColdId;
-                else if (warmth < 18.5f) targetStatusId = ThermalStatusEffects.ChillyId;
-            }
-            else if (_currentActiveStatusId == ThermalStatusEffects.ChillyId)
-            {
-                if (warmth < -12.5f) targetStatusId = ThermalStatusEffects.HypothermiaId;
-                else if (warmth < -0.5f) targetStatusId = ThermalStatusEffects.NumbingFrostId;
-                else if (warmth < 7.5f) targetStatusId = ThermalStatusEffects.BitterColdId;
-                else if (warmth < 18.5f) targetStatusId = ThermalStatusEffects.ChillyId;
-            }
-            else if (_currentActiveStatusId == ThermalStatusEffects.CatastrophicScorchingId)
-            {
-                if (warmth > 54.0f) targetStatusId = ThermalStatusEffects.CatastrophicScorchingId;
-                else if (warmth > 44.5f) targetStatusId = ThermalStatusEffects.SevereHyperthermiaId;
-                else if (warmth > 34.5f) targetStatusId = ThermalStatusEffects.HeatExhaustionId;
-                else if (warmth > 25.5f) targetStatusId = ThermalStatusEffects.WarmId;
-            }
-            else if (_currentActiveStatusId == ThermalStatusEffects.SevereHyperthermiaId)
-            {
-                if (warmth > 55.5f) targetStatusId = ThermalStatusEffects.CatastrophicScorchingId;
-                else if (warmth > 44.5f) targetStatusId = ThermalStatusEffects.SevereHyperthermiaId;
-                else if (warmth > 34.5f) targetStatusId = ThermalStatusEffects.HeatExhaustionId;
-                else if (warmth > 25.5f) targetStatusId = ThermalStatusEffects.WarmId;
-            }
-            else if (_currentActiveStatusId == ThermalStatusEffects.HeatExhaustionId)
-            {
-                if (warmth > 55.5f) targetStatusId = ThermalStatusEffects.CatastrophicScorchingId;
-                else if (warmth > 45.5f) targetStatusId = ThermalStatusEffects.SevereHyperthermiaId;
-                else if (warmth > 34.5f) targetStatusId = ThermalStatusEffects.HeatExhaustionId;
-                else if (warmth > 25.5f) targetStatusId = ThermalStatusEffects.WarmId;
-            }
-            else if (_currentActiveStatusId == ThermalStatusEffects.WarmId)
-            {
-                if (warmth > 55.5f) targetStatusId = ThermalStatusEffects.CatastrophicScorchingId;
-                else if (warmth > 45.5f) targetStatusId = ThermalStatusEffects.SevereHyperthermiaId;
-                else if (warmth > 35.5f) targetStatusId = ThermalStatusEffects.HeatExhaustionId;
-                else if (warmth > 25.5f) targetStatusId = ThermalStatusEffects.WarmId;
-            }
-            else
-            {
-                // Baseline entering cold or heat
-                if (warmth < 17.5f)
-                {
-                    if (warmth >= 7.5f) targetStatusId = ThermalStatusEffects.ChillyId;
-                    else if (warmth >= -0.5f) targetStatusId = ThermalStatusEffects.BitterColdId;
-                    else if (warmth >= -12.5f) targetStatusId = ThermalStatusEffects.NumbingFrostId;
-                    else targetStatusId = ThermalStatusEffects.HypothermiaId;
-                }
-                else if (warmth > 26.5f)
-                {
-                    if (warmth <= 35.5f) targetStatusId = ThermalStatusEffects.WarmId;
-                    else if (warmth <= 45.5f) targetStatusId = ThermalStatusEffects.HeatExhaustionId;
-                    else if (warmth <= 55.5f) targetStatusId = ThermalStatusEffects.SevereHyperthermiaId;
-                    else targetStatusId = ThermalStatusEffects.CatastrophicScorchingId;
-                }
-            }
+            string? targetStatusId = EvaluateThermalStatusTier(warmth);
 
             // Apply periodic ticking extreme damage if in catastrophic tiers
             if (targetStatusId == ThermalStatusEffects.HypothermiaId)
@@ -487,22 +451,64 @@ namespace VikingClimate.Features.Temperature
             return val >= 0.0f ? $"+{val:F1}°C" : $"{val:F1}°C";
         }
 
-        private static string GetTemperatureColorHex(float temp)
+        public static Color GetTemperatureColor(float warmth)
         {
-            if (temp < 0.0f) return "#64B5F6";  // Ice blue
-            if (temp < 18.0f) return "#81D4FA"; // Chilly light cyan
-            if (temp <= 26.0f) return "#81C784";// Comfort green
-            if (temp <= 45.0f) return "#FFB74D";// Warm amber
-            return "#E57373";                   // Scorching red
+            float minComfort = ModConfig.ComfortMinTemp.Value;
+            float maxComfort = ModConfig.ComfortMaxTemp.Value;
+
+            if (warmth < minComfort)
+            {
+                if (warmth < -12.0f) return new Color(0.25f, 0.32f, 0.71f); // Hypothermia: Deep Indigo
+                if (warmth < 0.0f) return new Color(0.26f, 0.65f, 0.96f);   // Numbing Frost: Ice Blue
+                if (warmth < 8.0f) return new Color(0.30f, 0.82f, 0.88f);   // Bitter Cold: Cyan
+                return new Color(0.50f, 0.87f, 0.92f);                      // Chilly: Soft Sky Cyan
+            }
+
+            if (warmth > maxComfort)
+            {
+                if (warmth > 55.0f) return new Color(0.94f, 0.33f, 0.31f);  // Catastrophic Scorching: Crimson
+                if (warmth > 45.0f) return new Color(1.00f, 0.44f, 0.26f);  // Severe Hyperthermia: Deep Orange-Red
+                if (warmth > 35.0f) return new Color(1.00f, 0.65f, 0.15f);  // Heat Exhaustion: Vivid Orange
+                return new Color(1.00f, 0.93f, 0.35f);                      // Warm: Warm Amber-Yellow
+            }
+
+            return new Color(0.51f, 0.78f, 0.52f);                          // Comfort: Pleasant Green
+        }
+
+        public static string GetTemperatureColorHex(float warmth)
+        {
+            float minComfort = ModConfig.ComfortMinTemp.Value;
+            float maxComfort = ModConfig.ComfortMaxTemp.Value;
+
+            if (warmth < minComfort)
+            {
+                if (warmth < -12.0f) return "#3F51B5"; // Hypothermia
+                if (warmth < 0.0f) return "#42A5F5";   // Numbing Frost
+                if (warmth < 8.0f) return "#4DD0E1";   // Bitter Cold
+                return "#80DEEA";                      // Chilly
+            }
+
+            if (warmth > maxComfort)
+            {
+                if (warmth > 55.0f) return "#EF5350";  // Catastrophic Scorching
+                if (warmth > 45.0f) return "#FF7043";  // Severe Hyperthermia
+                if (warmth > 35.0f) return "#FFA726";  // Heat Exhaustion
+                return "#FFEE58";                      // Warm
+            }
+
+            return "#81C784";                          // Comfort
         }
 
         private static string GetWarmthConditionDescriptor(float warmth)
         {
+            float minComfort = ModConfig.ComfortMinTemp.Value;
+            float maxComfort = ModConfig.ComfortMaxTemp.Value;
+
             if (warmth < -12.0f) return "Catastrophic Hypothermia";
             if (warmth < 0.0f) return "Numbing Frost";
             if (warmth < 8.0f) return "Bitter Cold";
-            if (warmth < 18.0f) return "Chilly Discomfort";
-            if (warmth <= 26.0f) return "Comfort Equilibrium";
+            if (warmth < minComfort) return "Chilly Discomfort";
+            if (warmth <= maxComfort) return "Comfort Equilibrium";
             if (warmth <= 35.0f) return "Warm";
             if (warmth <= 45.0f) return "Heat Exhaustion";
             if (warmth <= 55.0f) return "Severe Hyperthermia";

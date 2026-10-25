@@ -173,18 +173,22 @@ namespace VikingClimate.Patches
                     }
                 }
 
-                // Core condition: warm dwelling or campfire/heat area, with shelter or sitting, and comfortable core temperature
+                // Core condition: warm dwelling or campfire/heat area, with shelter or sitting
                 bool isInside = ThermalGraphManager.IsInsideCompound(player) || player.InShelter();
                 bool nearFire = seMan.HaveStatusEffect(SEMan.s_statusEffectCampFire) || EffectArea.IsPointInsideArea(player.transform.position, EffectArea.Type.Heat, 1.0f);
-                bool canRest = isInside || (nearFire && player.IsSitting());
 
-                float playerTemp = SurvivalManager.CurrentState.BodyWarmth;
-                float minTemp = ModConfig.ComfortMinTemp.Value;
-                float maxTemp = ModConfig.ComfortMaxTemp.Value;
+                // Dwelling warmth: if inside without a direct campfire, the indoor ambient must meet the comfort/resting threshold
+                float ambientTemp = SurvivalManager.CurrentState.AmbientTemperature;
+                float minRestingTemp = Mathf.Min(ModConfig.RestingMinTemp.Value, ModConfig.ComfortMinTemp.Value);
+                float maxRestingTemp = Mathf.Max(ModConfig.RestingMaxTemp.Value, ModConfig.ComfortMaxTemp.Value);
+                bool isDwellingComfortable = isInside && (ambientTemp >= minRestingTemp && ambientTemp <= maxRestingTemp);
 
-                bool inComfortZone = canRest && (playerTemp >= minTemp && playerTemp <= maxTemp);
+                bool environmentWarm = nearFire || isDwellingComfortable;
+                bool physicalRestingPosture = isInside || (nearFire && player.IsSitting());
 
-                if (inComfortZone)
+                bool canRest = physicalRestingPosture && environmentWarm;
+
+                if (canRest)
                 {
                     s_comfortZoneTimer += Time.deltaTime;
                     return s_comfortZoneTimer >= ModConfig.RestingActivationDelay.Value;

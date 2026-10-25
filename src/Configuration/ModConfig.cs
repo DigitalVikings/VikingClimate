@@ -14,6 +14,7 @@ namespace VikingClimate.Configuration
         public static ConfigEntry<float> ComfortMaxTemp { get; private set; } = null!;
         public static ConfigEntry<bool> EnableStructureComfort { get; private set; } = null!;
         public static ConfigEntry<bool> EnableThermalResting { get; private set; } = null!;
+        public static ConfigEntry<bool> RequireWarmthToSleep { get; private set; } = null!;
         public static ConfigEntry<float> RestingMinTemp { get; private set; } = null!;
         public static ConfigEntry<float> RestingMaxTemp { get; private set; } = null!;
         public static ConfigEntry<float> RestingActivationDelay { get; private set; } = null!;
@@ -164,13 +165,23 @@ namespace VikingClimate.Configuration
                 isAdminOnly: true
             );
 
+            RequireWarmthToSleep = Bind(
+                config,
+                "2 - Player Comfort & Thresholds",
+                "RequireWarmthToSleep",
+                false,
+                "When enabled, sleeping in a bed is blocked if the player is cold (body temperature below ComfortMinTemp). Disabled by default.",
+                order: 82,
+                isAdminOnly: true
+            );
+
             RestingMinTemp = Bind(
                 config,
                 "2 - Player Comfort & Thresholds",
                 "RestingMinTemp",
-                23.0f,
-                "Minimum ambient temperature in Celsius required to enter and maintain the Resting state, and to sleep in a bed.",
-                order: 82,
+                18.0f,
+                "Minimum ambient temperature in Celsius required to enter and maintain the Resting state inside dwellings without a direct campfire.",
+                order: 81,
                 new AcceptableValueRange<float>(-50.0f, 100.0f),
                 isAdminOnly: true
             );
@@ -179,9 +190,9 @@ namespace VikingClimate.Configuration
                 config,
                 "2 - Player Comfort & Thresholds",
                 "RestingMaxTemp",
-                27.0f,
+                28.0f,
                 "Maximum ambient temperature in Celsius before excessive heat disrupts the Resting state.",
-                order: 81,
+                order: 80,
                 new AcceptableValueRange<float>(-50.0f, 100.0f),
                 isAdminOnly: true
             );

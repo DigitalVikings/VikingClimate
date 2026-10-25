@@ -77,13 +77,7 @@ namespace VikingClimate.Patches
                 float minTemp = ModConfig.ComfortMinTemp.Value;
                 float maxTemp = ModConfig.ComfortMaxTemp.Value;
 
-                bool isInside = ThermalGraphManager.IsInsideCompound(human);
-
-                if (isInside && playerTemp >= minTemp && playerTemp <= maxTemp)
-                {
-                    __result = true;
-                    return false;
-                }
+                bool isInside = ThermalGraphManager.IsInsideCompound(human) || human.InShelter();
 
                 if (!isInside)
                 {
@@ -92,7 +86,7 @@ namespace VikingClimate.Patches
                     return false;
                 }
 
-                if (playerTemp < minTemp)
+                if (ModConfig.RequireWarmthToSleep.Value && playerTemp < minTemp)
                 {
                     human.Message(MessageHud.MessageType.Center, $"You are too cold to sleep ({playerTemp:F0}°C / Need {minTemp:F0}°C)");
                     __result = false;
@@ -106,8 +100,7 @@ namespace VikingClimate.Patches
                     return false;
                 }
 
-                human.Message(MessageHud.MessageType.Center, "You need shelter to sleep");
-                __result = false;
+                __result = true;
                 return false;
             }
         }

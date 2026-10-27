@@ -80,9 +80,13 @@ namespace VikingClimate.Configuration
 
         // 9 - UI & Thermometer HUD
         public static ConfigEntry<bool> ShowThermometerHUD { get; private set; } = null!;
-        public static ConfigEntry<float> ThermometerOffsetX { get; private set; } = null!;
-        public static ConfigEntry<float> ThermometerOffsetY { get; private set; } = null!;
-        public static ConfigEntry<float> ForsakenPowerOffsetX { get; private set; } = null!;
+        public static ConfigEntry<float> ThermometerPositionX { get; private set; } = null!;
+        public static ConfigEntry<float> ThermometerPositionY { get; private set; } = null!;
+        public static ConfigEntry<bool> EnableScreenVignettes { get; private set; } = null!;
+        public static ConfigEntry<float> FrostVignetteStartTemp { get; private set; } = null!;
+        public static ConfigEntry<float> FrostVignetteMaxAlpha { get; private set; } = null!;
+        public static ConfigEntry<float> HeatVignetteStartTemp { get; private set; } = null!;
+        public static ConfigEntry<float> HeatVignetteMaxAlpha { get; private set; } = null!;
 
         // 10 - Inspection & Debugging
         public static ConfigEntry<bool> DebugFreezeAmbientTemp { get; private set; } = null!;
@@ -668,36 +672,79 @@ namespace VikingClimate.Configuration
                 isAdminOnly: false
             );
 
-            ThermometerOffsetX = Bind(
+            ThermometerPositionX = Bind(
                 config,
                 "9 - UI & Thermometer HUD",
-                "ThermometerOffsetX",
-                0.0f,
-                "Horizontal pixel offset of the thermometer relative to its calculated position.",
+                "ThermometerPositionX",
+                -65.0f,
+                "Horizontal pixel position (X) of the thermometer. Anchored to top-right corner (negative values move leftwards from the right screen edge, defaulting directly below the minimap).",
                 order: 25,
-                new AcceptableValueRange<float>(-2000.0f, 2000.0f),
+                new AcceptableValueRange<float>(-3000.0f, 3000.0f),
                 isAdminOnly: false
             );
 
-            ThermometerOffsetY = Bind(
+            ThermometerPositionY = Bind(
                 config,
                 "9 - UI & Thermometer HUD",
-                "ThermometerOffsetY",
-                0.0f,
-                "Vertical pixel offset of the thermometer relative to its calculated position.",
+                "ThermometerPositionY",
+                -230.0f,
+                "Vertical pixel position (Y) of the thermometer. Anchored to top-right corner (negative values move downwards from the top screen edge, defaulting directly below the minimap).",
                 order: 20,
-                new AcceptableValueRange<float>(-2000.0f, 2000.0f),
+                new AcceptableValueRange<float>(-3000.0f, 3000.0f),
                 isAdminOnly: false
             );
 
-            ForsakenPowerOffsetX = Bind(
+            EnableScreenVignettes = Bind(
                 config,
                 "9 - UI & Thermometer HUD",
-                "ForsakenPowerOffsetX",
-                54.0f,
-                "Horizontal pixel shift applied to Forsaken Power and Quick Slots to accommodate the thermometer bar.",
-                order: 15,
-                new AcceptableValueRange<float>(-500.0f, 500.0f),
+                "EnableScreenVignettes",
+                true,
+                "Enable atmospheric screen-edge vignettes for extreme cold (frost clouding) and heat (mirage blur/distortion).",
+                order: 14,
+                isAdminOnly: false
+            );
+
+            FrostVignetteStartTemp = Bind(
+                config,
+                "9 - UI & Thermometer HUD",
+                "FrostVignetteStartTemp",
+                0.0f,
+                "Player body warmth in Celsius below which the screen-edge frost vignette begins to appear.",
+                order: 13,
+                new AcceptableValueRange<float>(-25.0f, 15.0f),
+                isAdminOnly: false
+            );
+
+            FrostVignetteMaxAlpha = Bind(
+                config,
+                "9 - UI & Thermometer HUD",
+                "FrostVignetteMaxAlpha",
+                0.10f,
+                "Maximum opacity of the screen-edge frost vignette during severe hypothermia.",
+                order: 12,
+                new AcceptableValueRange<float>(0.0f, 1.0f),
+                isAdminOnly: false
+            );
+
+            HeatVignetteStartTemp = Bind(
+                config,
+                "9 - UI & Thermometer HUD",
+                "HeatVignetteStartTemp",
+                38.0f,
+                "Player body warmth in Celsius above which screen-edge heat blur and camera shimmer distortion begin to appear.",
+                order: 11,
+                new AcceptableValueRange<float>(26.0f, 60.0f),
+                isAdminOnly: false
+            );
+
+            HeatVignetteMaxAlpha = Bind(
+                config,
+                "9 - UI & Thermometer HUD",
+                "HeatVignetteMaxAlpha",
+                0.10f,
+                "Maximum opacity of the screen-edge heat blur vignette during extreme heat.",
+                order: 10,
+                new AcceptableValueRange<float>(0.0f, 1.0f),
                 isAdminOnly: false
             );
 
@@ -719,7 +766,7 @@ namespace VikingClimate.Configuration
                 15.0f,
                 "Target outdoor ambient temperature in Celsius when DebugFreezeAmbientTemp is enabled.",
                 order: 38,
-                new AcceptableValueRange<float>(-50.0f, 50.0f),
+                new AcceptableValueRange<float>(-60.0f, 100.0f),
                 isAdminOnly: false
             );
 

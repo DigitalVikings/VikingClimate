@@ -1,6 +1,8 @@
 import os
 import sys
-from PIL import Image
+from PIL import Image, ImageFilter
+import numpy as np
+from scipy import ndimage
 
 def key_black_background(img: Image.Image, low_thresh: int = 12, high_thresh: int = 50) -> Image.Image:
     """
@@ -84,8 +86,25 @@ def process_icon(input_path: str, output_path: str, target_size: int = 128, marg
     print(f"[Icon] Saved: {output_path} ({target_size}x{target_size})")
 
 def process_ui_sprite(input_path: str, output_path: str, target_width: int = None, target_height: int = None):
-    img = Image.open(input_path)
-    keyed = key_black_background(img, low_thresh=15, high_thresh=60)
+    img = Image.open(input_path).convert("RGB")
+    arr = np.array(img)
+    gray = np.max(arr, axis=2)
+    
+    # Outer border flood-fill so internal dark wood is never keyed to transparent
+    mask_dark = gray < 12
+    labeled, _ = ndimage.label(mask_dark)
+    border_pixels = np.concatenate([labeled[0, :], labeled[-1, :], labeled[:, 0], labeled[:, -1]])
+    border_labels = np.unique(border_pixels)
+    border_labels = border_labels[border_labels > 0]
+    is_bg = np.isin(labeled, border_labels)
+    
+    board_mask = (~is_bg).astype(np.uint8) * 255
+    board_mask = ndimage.binary_fill_holes(board_mask).astype(np.uint8) * 255
+    mask_im = Image.fromarray(board_mask, mode="L").filter(ImageFilter.GaussianBlur(radius=0.7))
+    
+    keyed = Image.new("RGBA", img.size)
+    keyed.paste(img, (0, 0))
+    keyed.putalpha(mask_im)
     
     bbox = keyed.getbbox()
     if bbox:

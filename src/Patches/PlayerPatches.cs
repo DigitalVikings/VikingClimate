@@ -33,6 +33,7 @@ namespace VikingClimate.Patches
             {
                 HUDThermometer.AttachToHud(Hud.instance);
                 ScreenFrostOverlay.AttachToHud(Hud.instance);
+                ScreenHeatOverlay.AttachToHud(Hud.instance);
             }
         }
 
@@ -228,6 +229,8 @@ namespace VikingClimate.Patches
         private static void OnHudAwake(Hud __instance)
         {
             HUDThermometer.AttachToHud(__instance);
+            ScreenFrostOverlay.AttachToHud(__instance);
+            ScreenHeatOverlay.AttachToHud(__instance);
         }
 
         /// <summary>

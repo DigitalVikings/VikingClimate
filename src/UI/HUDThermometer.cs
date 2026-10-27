@@ -41,23 +41,15 @@ namespace VikingClimate.UI
         private Image? _ambientMarkerImage;
         private TMP_Text? _ambientBadgeText;
 
-        // Layout Constants matching Valheim's Health bar
-        private const float ColumnWidth = 32f;
-        private const float ColumnHeight = 110f;
-        private const float CavityInset = 2f;
-        private const float CavityWidth = ColumnWidth - (CavityInset * 2f); // 28px
-        private const float CavityHeight = ColumnHeight - (CavityInset * 2f); // 106px
+        // Layout Constants matching Valheim's Health bar and calibrated to the Norse backing board
+        private const float ColumnWidth = 36f;
+        private const float ColumnHeight = 152f;
+        private const float CavityInset = 2.5f;
+        private const float CavityWidth = ColumnWidth - (CavityInset * 2f);
+        private const float CavityHeight = ColumnHeight - (CavityInset * 2f);
 
-        // Positioning: Column starts at X = 141 (BaseX + 35px), Y = 95.8f (Health base)
-        // Shifted by +35px to comfortably clear Valheim's health bar
-        private const float BaseX = 141f;
-        private const float BaseY = 95.8f;
-        private const float IconCenterY = 74f; // Matches healthicon Y = 74f
-
-        private const float VanillaGpX = 209f;
-        private const float VanillaGpY = 86f;
-
-        private Vector2? _vanillaQuickSlotsPos;
+        // Positioning: Anchored to Top-Right directly below the minimap
+        private const float IconCenterOffset = -21.8f;
 
         // Temperature Scale: Coincides directly with Catastrophic Hypothermia (-12°C) and Scorching (+55°C)
         // Comfort [18°C, 26°C] sits squarely in the golden center (45% to 57%).
@@ -109,18 +101,19 @@ namespace VikingClimate.UI
             var glassSprite = ClimateAssetLoader.GetUISprite("thermometer_glass");
             var mercurySprite = ClimateAssetLoader.GetUISprite("thermometer_mercury");
             var needleSprite = ClimateAssetLoader.GetUISprite("thermometer_needle");
+            var plaqueSprite = ClimateAssetLoader.GetUISprite("thermometer_plaque");
 
-            // 1. Root RectTransform positioned as the column frame
+            // 1. Root RectTransform positioned as the column frame anchored to Top-Right below minimap
             _rootRect.localScale = Vector3.one;
             _rootRect.localRotation = Quaternion.identity;
-            _rootRect.anchorMin = Vector2.zero;
-            _rootRect.anchorMax = Vector2.zero;
-            _rootRect.pivot = Vector2.zero;
+            _rootRect.anchorMin = new Vector2(1f, 1f);
+            _rootRect.anchorMax = new Vector2(1f, 1f);
+            _rootRect.pivot = new Vector2(1f, 1f);
             _rootRect.sizeDelta = new Vector2(ColumnWidth, ColumnHeight);
-            _rootRect.anchoredPosition = new Vector2(BaseX + ModConfig.ThermometerOffsetX.Value, BaseY + ModConfig.ThermometerOffsetY.Value);
+            _rootRect.anchoredPosition = new Vector2(ModConfig.ThermometerPositionX.Value, ModConfig.ThermometerPositionY.Value);
             _rootRect.SetAsLastSibling();
 
-            // 2. 32x32 Icon Underneath (matching healthicon size and baseline)
+            // 2. 38x38 Icon Underneath (matching healthicon size and baseline)
             var iconGo = new GameObject("ThermalIcon", typeof(RectTransform));
             iconGo.transform.SetParent(transform, false);
             var iconRect = iconGo.GetComponent<RectTransform>();
@@ -129,9 +122,8 @@ namespace VikingClimate.UI
             iconRect.anchorMin = Vector2.zero;
             iconRect.anchorMax = Vector2.zero;
             iconRect.pivot = new Vector2(0.5f, 0.5f);
-            iconRect.sizeDelta = new Vector2(32f, 32f);
-            // Relative to root base (Y = 95.8), icon center is at Y = 74 -> delta = -21.8f
-            iconRect.anchoredPosition = new Vector2(ColumnWidth * 0.5f, IconCenterY - BaseY);
+            iconRect.sizeDelta = new Vector2(38f, 38f);
+            iconRect.anchoredPosition = new Vector2(ColumnWidth * 0.5f, IconCenterOffset);
 
             _iconImage = iconGo.AddComponent<Image>();
             _iconImage.sprite = iconSprite;
@@ -139,90 +131,122 @@ namespace VikingClimate.UI
             _iconImage.color = new Color(0.51f, 0.78f, 0.52f);
             _iconImage.raycastTarget = false;
 
-            // 3. Column Outer Border (Valheim bog-oak frame with forged iron end-caps)
+            bool hasCustomBack = backSprite != null;
+
+            // 3. Master Instrument Backing Plate (Valheim bog-oak frame with forged iron end-caps & brass plaque)
             var borderImg = gameObject.AddComponent<Image>();
             borderImg.sprite = backSprite ?? whiteSprite;
             borderImg.type = Image.Type.Simple;
-            borderImg.color = backSprite != null ? Color.white : new Color(0.18f, 0.16f, 0.14f, 0.95f);
+            borderImg.color = hasCustomBack ? Color.white : new Color(0.18f, 0.16f, 0.14f, 0.95f);
             borderImg.raycastTarget = false;
 
-            // 4. Inner Dark Cavity
-            var cavityGo = new GameObject("Cavity", typeof(RectTransform));
-            cavityGo.transform.SetParent(transform, false);
-            var cavityRect = cavityGo.GetComponent<RectTransform>();
-            cavityRect.localScale = Vector3.one;
-            cavityRect.localRotation = Quaternion.identity;
-            cavityRect.anchorMin = Vector2.zero;
-            cavityRect.anchorMax = Vector2.one;
-            cavityRect.offsetMin = new Vector2(CavityInset, CavityInset);
-            cavityRect.offsetMax = new Vector2(-CavityInset, -CavityInset);
-            cavityRect.pivot = new Vector2(0.5f, 0.5f);
+            // 4. Procedural Cavity & Guidelines (only rendered if running without custom backing art)
+            if (!hasCustomBack)
+            {
+                var cavityGo = new GameObject("Cavity", typeof(RectTransform));
+                cavityGo.transform.SetParent(transform, false);
+                var cavityRect = cavityGo.GetComponent<RectTransform>();
+                cavityRect.localScale = Vector3.one;
+                cavityRect.localRotation = Quaternion.identity;
+                cavityRect.anchorMin = Vector2.zero;
+                cavityRect.anchorMax = Vector2.one;
+                cavityRect.offsetMin = new Vector2(CavityInset, CavityInset);
+                cavityRect.offsetMax = new Vector2(-CavityInset, -CavityInset);
+                cavityRect.pivot = new Vector2(0.5f, 0.5f);
 
-            var cavityImg = cavityGo.AddComponent<Image>();
-            cavityImg.sprite = whiteSprite;
-            cavityImg.type = Image.Type.Simple;
-            cavityImg.color = new Color(0.05f, 0.06f, 0.08f, backSprite != null ? 0.65f : 0.95f);
-            cavityImg.raycastTarget = false;
+                var cavityImg = cavityGo.AddComponent<Image>();
+                cavityImg.sprite = whiteSprite;
+                cavityImg.type = Image.Type.Simple;
+                cavityImg.color = new Color(0.05f, 0.06f, 0.08f, 0.95f);
+                cavityImg.raycastTarget = false;
 
-            // 5. Cylindrical Segment Dividers (matching the HP bar segments)
-            CreateSegmentLine(cavityGo, "Segment1", whiteSprite, CavityHeight * 0.25f);
-            CreateSegmentLine(cavityGo, "Segment2", whiteSprite, CavityHeight * 0.50f);
-            CreateSegmentLine(cavityGo, "Segment3", whiteSprite, CavityHeight * 0.75f);
+                CreateSegmentLine(cavityGo, "Segment1", whiteSprite, CavityHeight * 0.25f);
+                CreateSegmentLine(cavityGo, "Segment2", whiteSprite, CavityHeight * 0.50f);
+                CreateSegmentLine(cavityGo, "Segment3", whiteSprite, CavityHeight * 0.75f);
 
-            // Reference Freezing Marker (0°C = 33.3%)
-            float freezeRatio = (0f - MinTempScale) / TempRange;
-            CreateReferenceLine(cavityGo, "FreezingLine", whiteSprite,
-                freezeRatio * CavityHeight, CavityWidth, 1.5f,
-                new Color(0.39f, 0.71f, 0.96f, 0.50f));
+                float freezeRatio = (0f - MinTempScale) / TempRange;
+                CreateReferenceLine(cavityGo, "FreezingLine", whiteSprite,
+                    freezeRatio * CavityHeight, CavityWidth, 1.5f,
+                    new Color(0.39f, 0.71f, 0.96f, 0.50f));
 
-            // Reference Comfort Band (18°C to 26°C = 57.3% to 68.0%)
-            float comfortMinRatio = (18f - MinTempScale) / TempRange;
-            float comfortMaxRatio = (26f - MinTempScale) / TempRange;
-            CreateReferenceBand(cavityGo, "ComfortBand", whiteSprite,
-                comfortMinRatio * CavityHeight, (comfortMaxRatio - comfortMinRatio) * CavityHeight, CavityWidth,
-                new Color(0.51f, 0.78f, 0.52f, 0.16f));
+                float comfortMinRatio = (18f - MinTempScale) / TempRange;
+                float comfortMaxRatio = (26f - MinTempScale) / TempRange;
+                CreateReferenceBand(cavityGo, "ComfortBand", whiteSprite,
+                    comfortMinRatio * CavityHeight, (comfortMaxRatio - comfortMinRatio) * CavityHeight, CavityWidth,
+                    new Color(0.51f, 0.78f, 0.52f, 0.16f));
+            }
 
-            // 6. Body Warmth Liquid Fill (rises vertically from bottom)
+            // 5. Body Warmth Liquid Fill (crisp 3D cylindrical column rising in the groove)
             var fillGo = new GameObject("BodyFill", typeof(RectTransform));
-            fillGo.transform.SetParent(cavityGo.transform, false);
+            fillGo.transform.SetParent(transform, false);
             _bodyFillRect = fillGo.GetComponent<RectTransform>();
             _bodyFillRect.localScale = Vector3.one;
             _bodyFillRect.localRotation = Quaternion.identity;
             _bodyFillRect.anchorMin = Vector2.zero;
-            _bodyFillRect.anchorMax = new Vector2(1f, 0f);
+            _bodyFillRect.anchorMax = Vector2.zero;
             _bodyFillRect.pivot = new Vector2(0.5f, 0f);
-            _bodyFillRect.anchoredPosition = Vector2.zero;
-            _bodyFillRect.sizeDelta = new Vector2(0f, 0f);
+
+            float fillX = hasCustomBack ? (ColumnWidth * (50.0f / 104.0f)) : (ColumnWidth * 0.5f);
+            float fillBottomY = hasCustomBack ? (ColumnHeight * (52.0f / 440.0f)) : CavityInset;
+            float fillTotalHeight = hasCustomBack ? (ColumnHeight * (328.0f / 440.0f)) : CavityHeight;
+            float fillWidth = hasCustomBack ? (ColumnWidth * (30.0f / 104.0f)) : CavityWidth;
+
+            _bodyFillRect.anchoredPosition = new Vector2(fillX, fillBottomY);
+            _bodyFillRect.sizeDelta = new Vector2(fillWidth, fillTotalHeight);
 
             _bodyFillImage = fillGo.AddComponent<Image>();
             _bodyFillImage.sprite = mercurySprite ?? whiteSprite;
-            _bodyFillImage.type = Image.Type.Simple;
+            _bodyFillImage.type = Image.Type.Filled;
+            _bodyFillImage.fillMethod = Image.FillMethod.Vertical;
+            _bodyFillImage.fillOrigin = (int)Image.OriginVertical.Bottom;
+            _bodyFillImage.fillAmount = 0.5f;
             _bodyFillImage.color = new Color(0.51f, 0.78f, 0.52f);
             _bodyFillImage.raycastTarget = false;
 
-            // Glass Overlay Tube
+            // 5b. Glass Capillary Tube Overlay (specular gloss and soft translucent glass body)
             if (glassSprite != null)
             {
-                var glassGo = new GameObject("GlassOverlay", typeof(RectTransform));
-                glassGo.transform.SetParent(cavityGo.transform, false);
+                var glassGo = new GameObject("GlassCapillary", typeof(RectTransform));
+                glassGo.transform.SetParent(transform, false);
                 var glassRect = glassGo.GetComponent<RectTransform>();
                 glassRect.localScale = Vector3.one;
                 glassRect.localRotation = Quaternion.identity;
                 glassRect.anchorMin = Vector2.zero;
-                glassRect.anchorMax = Vector2.one;
-                glassRect.offsetMin = Vector2.zero;
-                glassRect.offsetMax = Vector2.zero;
-                glassRect.pivot = new Vector2(0.5f, 0.5f);
+                glassRect.anchorMax = Vector2.zero;
+                glassRect.pivot = new Vector2(0.5f, 0f);
+                glassRect.anchoredPosition = new Vector2(fillX, fillBottomY);
+                glassRect.sizeDelta = new Vector2(fillWidth, fillTotalHeight);
 
                 var glassImg = glassGo.AddComponent<Image>();
                 glassImg.sprite = glassSprite;
                 glassImg.type = Image.Type.Simple;
-                glassImg.color = new Color(1f, 1f, 1f, 0.75f);
+                glassImg.color = Color.white;
                 glassImg.raycastTarget = false;
             }
 
-            // 7. Ambient Target Pointer: [bar]<| (feels like)
-            // Attaches to the right edge of the column without intersecting the cavity or numbers
+            // 5c. Brass Plaque Overlay (renders IN FRONT of the capillary tube and liquid)
+            if (plaqueSprite != null)
+            {
+                var plaqueGo = new GameObject("PlaqueOverlay", typeof(RectTransform));
+                plaqueGo.transform.SetParent(transform, false);
+                var plaqueRect = plaqueGo.GetComponent<RectTransform>();
+                plaqueRect.localScale = Vector3.one;
+                plaqueRect.localRotation = Quaternion.identity;
+                plaqueRect.anchorMin = Vector2.zero;
+                plaqueRect.anchorMax = Vector2.one;
+                plaqueRect.pivot = new Vector2(0.5f, 0.5f);
+                plaqueRect.offsetMin = Vector2.zero;
+                plaqueRect.offsetMax = Vector2.zero;
+
+                var plaqueImg = plaqueGo.AddComponent<Image>();
+                plaqueImg.sprite = plaqueSprite;
+                plaqueImg.type = Image.Type.Simple;
+                plaqueImg.color = Color.white;
+                plaqueImg.raycastTarget = false;
+            }
+
+            // 6. Ambient Target Pointer: [bar]<| (feels like)
+            // Attaches to the right edge of the column pointing directly at the channel level
             var indicatorGo = new GameObject("AmbientIndicator", typeof(RectTransform));
             indicatorGo.transform.SetParent(transform, false);
             _ambientMarkerRect = indicatorGo.GetComponent<RectTransform>();
@@ -231,8 +255,8 @@ namespace VikingClimate.UI
             _ambientMarkerRect.anchorMin = Vector2.zero;
             _ambientMarkerRect.anchorMax = Vector2.zero;
             _ambientMarkerRect.pivot = new Vector2(0f, 0.5f);
-            _ambientMarkerRect.sizeDelta = new Vector2(40f, 16f);
-            _ambientMarkerRect.anchoredPosition = new Vector2(ColumnWidth, CavityInset + (CavityHeight * 0.5f));
+            _ambientMarkerRect.sizeDelta = new Vector2(50f, 20f);
+            _ambientMarkerRect.anchoredPosition = new Vector2(ColumnWidth, fillBottomY + (fillTotalHeight * 0.5f));
 
             // Arrow: Forged iron pointer arrow pointing left directly at the thermometer level
             var arrowGo = new GameObject("Arrow", typeof(RectTransform));
@@ -243,7 +267,7 @@ namespace VikingClimate.UI
             arrowRect.anchorMin = new Vector2(0f, 0.5f);
             arrowRect.anchorMax = new Vector2(0f, 0.5f);
             arrowRect.pivot = new Vector2(0f, 0.5f);
-            arrowRect.sizeDelta = needleSprite != null ? new Vector2(16f, 10f) : new Vector2(7f, 9f);
+            arrowRect.sizeDelta = needleSprite != null ? new Vector2(20f, 13f) : new Vector2(9f, 11f);
             arrowRect.anchoredPosition = new Vector2(0f, 0f);
 
             _ambientMarkerImage = arrowGo.AddComponent<Image>();
@@ -254,21 +278,25 @@ namespace VikingClimate.UI
 
             TMP_Text? fontSource = hud.m_healthText ?? hud.m_gpName ?? hud.m_actionName;
 
-            // Ambient Temperature Badge (positioned cleanly after the arrow base, vertically centered with the arrow)
+            // Ambient Temperature Badge (positioned cleanly after the arrow base)
             _ambientBadgeText = CreateTextElement(indicatorGo, "AmbientBadge", fontSource,
-                new Vector2(9.5f, 0f), new Vector2(32f, 16f), 10.5f);
+                new Vector2(13f, 0f), new Vector2(46f, 20f), 13f);
             _ambientBadgeText.rectTransform.anchorMin = new Vector2(0f, 0.5f);
             _ambientBadgeText.rectTransform.anchorMax = new Vector2(0f, 0.5f);
             _ambientBadgeText.rectTransform.pivot = new Vector2(0f, 0.5f);
-            _ambientBadgeText.rectTransform.anchoredPosition = new Vector2(9.5f, 0f);
+            _ambientBadgeText.rectTransform.anchoredPosition = new Vector2(13f, 0f);
             _ambientBadgeText.alignment = TextAlignmentOptions.MidlineLeft;
             _ambientBadgeText.margin = Vector4.zero;
             _ambientBadgeText.text = "17°";
 
-            // 8. Large Centered Body Warmth Text (exact same 18pt font and style as HP bar)
+            // 7. Bottom Body Warmth Text (positioned cleanly on the bottom iron plate)
             _bodyText = CreateTextElement(gameObject, "BodyText", fontSource,
-                new Vector2(ColumnWidth * 0.5f, ColumnHeight * 0.5f),
-                new Vector2(ColumnWidth + 10f, 24f), 18f);
+                new Vector2(ColumnWidth * 0.5f, 9.0f),
+                new Vector2(70f, 24f), 17f);
+            _bodyText.rectTransform.anchorMin = new Vector2(0.5f, 0f);
+            _bodyText.rectTransform.anchorMax = new Vector2(0.5f, 0f);
+            _bodyText.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            _bodyText.rectTransform.anchoredPosition = new Vector2(0f, 9.0f);
             _bodyText.alignment = TextAlignmentOptions.Center;
             _bodyText.fontStyle = FontStyles.Bold;
             _bodyText.text = "22°";
@@ -341,17 +369,8 @@ namespace VikingClimate.UI
             Vector2 size,
             float fontSize)
         {
-            GameObject textGo;
-            if (fontSource != null && fontSource.gameObject != null)
-            {
-                textGo = UnityEngine.Object.Instantiate(fontSource.gameObject, parent.transform, false);
-                textGo.name = name;
-            }
-            else
-            {
-                textGo = new GameObject(name, typeof(RectTransform));
-                textGo.transform.SetParent(parent.transform, false);
-            }
+            var textGo = new GameObject(name, typeof(RectTransform));
+            textGo.transform.SetParent(parent.transform, false);
 
             var rt = textGo.GetComponent<RectTransform>();
             rt.localScale = Vector3.one;
@@ -362,20 +381,21 @@ namespace VikingClimate.UI
             rt.anchoredPosition = centerPos;
             rt.sizeDelta = size;
 
-            var tmp = textGo.GetComponent<TMP_Text>();
-            if (tmp == null)
+            var tmp = textGo.AddComponent<TextMeshProUGUI>();
+            if (fontSource != null && fontSource.font != null)
             {
-                tmp = textGo.AddComponent<TextMeshProUGUI>();
-                if (fontSource != null && fontSource.font != null)
-                {
-                    tmp.font = fontSource.font;
-                }
+                tmp.font = fontSource.font;
+                tmp.fontMaterial = fontSource.fontMaterial;
             }
 
             tmp.fontSize = fontSize;
+            tmp.enableAutoSizing = false;
             tmp.alignment = TextAlignmentOptions.Center;
             tmp.textWrappingMode = TextWrappingModes.NoWrap;
+            tmp.overflowMode = TextOverflowModes.Overflow;
+            tmp.maskable = false;
             tmp.raycastTarget = false;
+            tmp.margin = Vector4.zero;
             tmp.color = Color.white;
             return tmp;
         }
@@ -401,31 +421,10 @@ namespace VikingClimate.UI
                 _canvasGroup.alpha = 1f;
             }
 
-            // 1. Maintain LowerLeft anchored position with config offsets
+            // 1. Maintain Top-Right anchored position with config coordinates
             if (_rootRect != null)
             {
-                _rootRect.anchoredPosition = new Vector2(BaseX + ModConfig.ThermometerOffsetX.Value, BaseY + ModConfig.ThermometerOffsetY.Value);
-            }
-
-            // 2. Synchronized Rightward Shift of Forsaken Power & Quick Slots
-            float gpShift = ModConfig.ForsakenPowerOffsetX.Value;
-            if (hud.m_gpRoot != null)
-            {
-                hud.m_gpRoot.anchoredPosition = new Vector2(VanillaGpX + gpShift, VanillaGpY);
-            }
-
-            // Also shift QuickSlotsHotkeyBar so Forsaken Power never collides with it
-            if (hud.m_rootObject != null)
-            {
-                var qsTransform = hud.m_rootObject.transform.Find("QuickSlotsHotkeyBar") as RectTransform;
-                if (qsTransform != null)
-                {
-                    if (!_vanillaQuickSlotsPos.HasValue)
-                    {
-                        _vanillaQuickSlotsPos = qsTransform.anchoredPosition;
-                    }
-                    qsTransform.anchoredPosition = new Vector2(_vanillaQuickSlotsPos.Value.x + gpShift, _vanillaQuickSlotsPos.Value.y);
-                }
+                _rootRect.anchoredPosition = new Vector2(ModConfig.ThermometerPositionX.Value, ModConfig.ThermometerPositionY.Value);
             }
 
             var state = SurvivalManager.CurrentState;
@@ -438,12 +437,9 @@ namespace VikingClimate.UI
             bool isCritical = bodyWarmth < MinTempScale || bodyWarmth > MaxTempScale;
             float flashAlpha = isCritical ? (0.40f + 0.60f * Mathf.Abs(Mathf.Sin(Time.time * 6.0f))) : 1.0f;
 
-            if (_bodyFillRect != null)
-            {
-                _bodyFillRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, CavityHeight * bodyRatio);
-            }
             if (_bodyFillImage != null)
             {
+                _bodyFillImage.fillAmount = bodyRatio;
                 _bodyFillImage.color = new Color(warmthColor.r, warmthColor.g, warmthColor.b, flashAlpha);
             }
             if (_bodyText != null)
@@ -495,7 +491,9 @@ namespace VikingClimate.UI
 
             if (_ambientMarkerRect != null)
             {
-                float arrowY = CavityInset + (CavityHeight * ambientRatio);
+                float fillBottomY = ColumnHeight * (52.0f / 440.0f);
+                float fillTotalHeight = ColumnHeight * (328.0f / 440.0f);
+                float arrowY = fillBottomY + (fillTotalHeight * ambientRatio);
                 _ambientMarkerRect.anchoredPosition = new Vector2(ColumnWidth, arrowY);
             }
             if (_ambientMarkerImage != null)
@@ -643,19 +641,6 @@ namespace VikingClimate.UI
 
         private void OnDestroy()
         {
-            if (_hud != null && _hud.m_gpRoot != null)
-            {
-                _hud.m_gpRoot.anchoredPosition = new Vector2(VanillaGpX, VanillaGpY);
-            }
-            if (_hud != null && _hud.m_rootObject != null && _vanillaQuickSlotsPos.HasValue)
-            {
-                var qsTransform = _hud.m_rootObject.transform.Find("QuickSlotsHotkeyBar") as RectTransform;
-                if (qsTransform != null)
-                {
-                    qsTransform.anchoredPosition = _vanillaQuickSlotsPos.Value;
-                }
-            }
-
             if (_instance == this) _instance = null;
         }
     }

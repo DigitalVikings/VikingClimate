@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using UnityEngine;
 using VikingClimate.Configuration;
 using VikingClimate.Core;
@@ -14,6 +14,7 @@ namespace VikingClimate.Features.Temperature
     {
         private Player? _player;
         private ParticleSystem? _particles;
+        private ParticleSystemRenderer? _renderer;
         private Transform? _emitterTransform;
 
         private float _breathTimer = 0f;
@@ -93,13 +94,47 @@ namespace VikingClimate.Features.Temperature
             velocityOverLifetime.y = new ParticleSystem.MinMaxCurve(0.12f);
 
             // 7. Renderer setup
-            var renderer = go.GetComponent<ParticleSystemRenderer>();
-            if (renderer != null)
+            _renderer = go.GetComponent<ParticleSystemRenderer>();
+            EnsureMaterial();
+        }
+
+        private void EnsureMaterial()
+        {
+            if (_renderer == null) return;
+            if (_renderer.sharedMaterial != null && _renderer.sharedMaterial.shader != null
+                && _renderer.sharedMaterial.shader.name != "Hidden/InternalErrorShader")
             {
-                Shader? shader = Shader.Find("Particles/Standard Unlit") ?? Shader.Find("Mobile/Particles/Alpha Blended");
-                if (shader != null)
+                return;
+            }
+
+            if (ZNetScene.instance != null)
+            {
+                // 1. Try native vfx_Freezing prefab (official Valheim breath / freezing particle)
+                var freezing = ZNetScene.instance.GetPrefab("vfx_Freezing");
+                if (freezing != null)
                 {
-                    renderer.material = new Material(shader);
+                    var psr = freezing.transform.Find("Breath")?.GetComponent<ParticleSystemRenderer>()
+                        ?? freezing.transform.Find("soft cloud")?.GetComponent<ParticleSystemRenderer>()
+                        ?? freezing.GetComponentInChildren<ParticleSystemRenderer>();
+                    if (psr != null && psr.sharedMaterial != null)
+                    {
+                        _renderer.material = new Material(psr.sharedMaterial);
+                        return;
+                    }
+                }
+
+                // 2. Fallback to smoke or frost prefabs
+                var fallbackPrefab = ZNetScene.instance.GetPrefab("smoke")
+                    ?? ZNetScene.instance.GetPrefab("vfx_Frost")
+                    ?? ZNetScene.instance.GetPrefab("vfx_ice_destroyed");
+                if (fallbackPrefab != null)
+                {
+                    var psr = fallbackPrefab.GetComponentInChildren<ParticleSystemRenderer>();
+                    if (psr != null && psr.sharedMaterial != null)
+                    {
+                        _renderer.material = new Material(psr.sharedMaterial);
+                        return;
+                    }
                 }
             }
         }
@@ -138,6 +173,8 @@ namespace VikingClimate.Features.Temperature
         {
             if (_particles == null || _player == null) return;
 
+            EnsureMaterial();
+
             // Align emitter forward with head direction
             Transform head = _player.m_eye != null ? _player.m_eye : transform;
             if (_emitterTransform != null)
@@ -153,6 +190,10 @@ namespace VikingClimate.Features.Temperature
 
         private void OnDestroy()
         {
+            if (_renderer != null && _renderer.material != null)
+            {
+                Destroy(_renderer.material);
+            }
             if (_particles != null && _particles.gameObject != null)
             {
                 Destroy(_particles.gameObject);

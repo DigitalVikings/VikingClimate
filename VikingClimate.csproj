@@ -8,7 +8,7 @@
     <AssemblyName>VikingClimate</AssemblyName>
     <RootNamespace>VikingClimate</RootNamespace>
     <Product>VikingClimate</Product>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <Authors>DigitalVikings</Authors>
     <LangVersion>11</LangVersion>
     <Nullable>enable</Nullable>

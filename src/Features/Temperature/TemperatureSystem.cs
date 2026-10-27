@@ -16,6 +16,8 @@ namespace VikingClimate.Features.Temperature
     public static class TemperatureSystem
     {
         private static string? _currentActiveStatusId = null;
+        private static float _damageTickTimer = 0f;
+        private const float DamageTickInterval = 1.0f; // 1 second between damage ticks
 
         public static void Init()
         {
@@ -187,32 +189,51 @@ namespace VikingClimate.Features.Temperature
         {
             string? targetStatusId = EvaluateThermalStatusTier(warmth);
 
-            // Apply periodic ticking extreme damage if in catastrophic tiers
+            // Apply periodic ticking extreme damage if in catastrophic tiers (every 1 second)
+            // Uses direct neutral damage to prevent triggering vanilla SE_Frost/SE_Burning debuffs on top of our custom status effects
             if (targetStatusId == ThermalStatusEffects.HypothermiaId)
             {
                 if (ModConfig.HypothermiaDamageRate.Value > 0f && player.GetHealth() > 1.0f)
                 {
-                    HitData hit = new HitData
+                    _damageTickTimer += dt;
+                    if (_damageTickTimer >= DamageTickInterval)
                     {
-                        m_damage = { m_frost = ModConfig.HypothermiaDamageRate.Value * dt },
-                        m_point = player.transform.position,
-                        m_dir = Vector3.down
-                    };
-                    player.Damage(hit);
+                        _damageTickTimer = 0f;
+                        float damageAmount = ModConfig.HypothermiaDamageRate.Value * DamageTickInterval;
+                        HitData hit = new HitData
+                        {
+                            m_damage = { m_damage = damageAmount },
+                            m_point = player.transform.position,
+                            m_dir = Vector3.down,
+                            m_hitType = HitData.HitType.PlayerHit
+                        };
+                        player.ApplyDamage(hit, showDamageText: true, triggerEffects: false, HitData.DamageModifier.Normal);
+                    }
                 }
             }
             else if (targetStatusId == ThermalStatusEffects.CatastrophicScorchingId)
             {
                 if (ModConfig.HyperthermiaDamageRate.Value > 0f && player.GetHealth() > 1.0f)
                 {
-                    HitData hit = new HitData
+                    _damageTickTimer += dt;
+                    if (_damageTickTimer >= DamageTickInterval)
                     {
-                        m_damage = { m_fire = ModConfig.HyperthermiaDamageRate.Value * dt },
-                        m_point = player.transform.position,
-                        m_dir = Vector3.down
-                    };
-                    player.Damage(hit);
+                        _damageTickTimer = 0f;
+                        float damageAmount = ModConfig.HyperthermiaDamageRate.Value * DamageTickInterval;
+                        HitData hit = new HitData
+                        {
+                            m_damage = { m_damage = damageAmount },
+                            m_point = player.transform.position,
+                            m_dir = Vector3.down,
+                            m_hitType = HitData.HitType.PlayerHit
+                        };
+                        player.ApplyDamage(hit, showDamageText: true, triggerEffects: false, HitData.DamageModifier.Normal);
+                    }
                 }
+            }
+            else
+            {
+                _damageTickTimer = 0f;
             }
 
             // Transition status effect if tier changed

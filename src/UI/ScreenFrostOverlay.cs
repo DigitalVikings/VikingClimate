@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using UnityEngine;
 using UnityEngine.UI;
 using VikingClimate.Configuration;
@@ -63,14 +63,14 @@ namespace VikingClimate.UI
             _overlayImage = gameObject.AddComponent<Image>();
             _overlayImage.sprite = GetFrostVignetteSprite();
             _overlayImage.type = Image.Type.Simple;
-            _overlayImage.color = new Color(0.80f, 0.92f, 1.0f, 0f);
+            _overlayImage.color = new Color(0.88f, 0.94f, 1.0f, 0f);
             _overlayImage.raycastTarget = false;
             _overlayImage.enabled = false;
         }
 
         private void Update()
         {
-            if (!ModConfig.ModEnabled.Value || _overlayImage == null)
+            if (!ModConfig.ModEnabled.Value || !ModConfig.EnableScreenVignettes.Value || _overlayImage == null)
             {
                 if (_overlayImage != null && _overlayImage.enabled)
                 {
@@ -90,38 +90,31 @@ namespace VikingClimate.UI
             }
 
             float warmth = SurvivalManager.CurrentState.BodyWarmth;
+            float startTemp = ModConfig.FrostVignetteStartTemp.Value;
+            float maxAlpha = ModConfig.FrostVignetteMaxAlpha.Value;
             float targetAlpha = 0f;
 
-            // Compute target frost vignette alpha based on cold severity:
-            // Comfort / Chilly (>= 8°C): 0%
-            // Bitter Cold (0°C to 8°C): 0% -> 12%
-            // Numbing Frost (-12°C to 0°C): 12% -> 28%
-            // Hypothermia (< -12°C): 28% -> 50%
-            if (warmth < 0f && warmth >= -12f)
+            if (warmth < startTemp && maxAlpha > 0f)
             {
-                float t = Mathf.Clamp01(-warmth / 12f);
-                targetAlpha = Mathf.Lerp(0.12f, 0.28f, t);
-            }
-            else if (warmth < -12f)
-            {
-                float t = Mathf.Clamp01((-warmth - 12f) / 13f);
-                targetAlpha = Mathf.Lerp(0.28f, 0.50f, t);
-                // Subtle shivering pulse in hypothermia
-                targetAlpha += Mathf.Sin(Time.time * 2.2f) * 0.03f;
-            }
-            else if (warmth < 8f)
-            {
-                float t = Mathf.Clamp01((8f - warmth) / 8f);
-                targetAlpha = Mathf.Lerp(0f, 0.12f, t);
+                // Full effect reached at -20°C
+                float severeTemp = -20.0f;
+                float t = Mathf.Clamp01((startTemp - warmth) / Mathf.Max(0.1f, startTemp - severeTemp));
+                targetAlpha = Mathf.Lerp(0.02f, maxAlpha, t);
+
+                // Subtle shivering pulse in deep hypothermia (< -12°C)
+                if (warmth < -12f)
+                {
+                    targetAlpha += Mathf.Sin(Time.time * 2.2f) * (maxAlpha * 0.15f);
+                }
             }
 
             // Smooth transition
             _currentAlpha = Mathf.MoveTowards(_currentAlpha, targetAlpha, Time.deltaTime * 0.35f);
 
-            if (_currentAlpha > 0.005f)
+            if (_currentAlpha > 0.003f)
             {
                 _overlayImage.enabled = true;
-                _overlayImage.color = new Color(0.80f, 0.92f, 1.0f, _currentAlpha);
+                _overlayImage.color = new Color(0.88f, 0.94f, 1.0f, _currentAlpha);
             }
             else
             {
@@ -152,15 +145,15 @@ namespace VikingClimate.UI
                     // Normalized distance from screen center (0 at center, 1 at edge, 1.41 at corners)
                     float dist = Mathf.Sqrt(dx * dx + dy * dy);
 
-                    // Transparent center oval (r < 0.60); soft frost vignette ramping up to the edges
+                    // Clear center (r < 0.82); only subtle border frost fading quickly towards center
                     float alpha = 0f;
-                    if (dist > 0.60f)
+                    if (dist > 0.82f)
                     {
-                        float t = Mathf.Clamp01((dist - 0.60f) / 0.55f);
-                        alpha = t * t * (3f - 2f * t); // Smoothstep curve
+                        float t = Mathf.Clamp01((dist - 0.82f) / 0.45f);
+                        alpha = t * t;
                     }
 
-                    // Frosted ice-blue tint
+                    // Frosted ice-white tint
                     colors[y * size + x] = new Color(1f, 1f, 1f, alpha);
                 }
             }

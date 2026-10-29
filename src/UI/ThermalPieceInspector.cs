@@ -21,6 +21,8 @@ namespace VikingClimate.UI
         private readonly List<PieceThermalNode> m_activeNeighbors = new List<PieceThermalNode>();
         private ActiveHeatSource? m_activeHeatSource;
         private readonly List<PieceThermalNode> m_activeFireImpacted = new List<PieceThermalNode>();
+        private ActiveHeatSource? m_lockedHeatSource;
+        private readonly List<PieceThermalNode> m_lockedFireImpacted = new List<PieceThermalNode>();
         private readonly HashSet<GameObject> m_highlightedObjects = new HashSet<GameObject>();
 
         private int m_emissionPropId;
@@ -50,6 +52,8 @@ namespace VikingClimate.UI
                 ModConfig.ShowPieceHoverDebug.Value = !ModConfig.ShowPieceHoverDebug.Value;
                 if (!ModConfig.ShowPieceHoverDebug.Value)
                 {
+                    m_lockedHeatSource = null;
+                    m_lockedFireImpacted.Clear();
                     ClearHighlights();
                     m_activeHovered = null;
                     m_activeNeighbors.Clear();
@@ -58,12 +62,38 @@ namespace VikingClimate.UI
                 }
             }
 
+            // Lock / unlock heat source highlights via hotkey
+            if (Input.GetKeyDown(ModConfig.LockHeatSourceHotkey.Value))
+            {
+                if (m_lockedHeatSource != null)
+                {
+                    m_lockedHeatSource = null;
+                    m_lockedFireImpacted.Clear();
+                    ClearHighlights();
+                }
+                else if (m_activeHeatSource != null)
+                {
+                    m_lockedHeatSource = m_activeHeatSource;
+                    m_lockedFireImpacted.Clear();
+                    m_lockedFireImpacted.AddRange(m_activeFireImpacted);
+                    ApplyHeatSourceHighlights(m_lockedHeatSource, m_lockedFireImpacted);
+                }
+            }
+
+            // Toggle inspection mode (single piece vs aggregated graph) via hotkey
+            if (Input.GetKeyDown(ModConfig.ToggleInspectionModeHotkey.Value))
+            {
+                ModConfig.InspectAggregatedGraph.Value = !ModConfig.InspectAggregatedGraph.Value;
+            }
+
             if (!ModConfig.ShowPieceHoverDebug.Value || Player.m_localPlayer == null)
             {
                 if (m_highlightedObjects.Count > 0)
                 {
                     ClearHighlights();
                 }
+                m_lockedHeatSource = null;
+                m_lockedFireImpacted.Clear();
                 m_activeHovered = null;
                 m_activeNeighbors.Clear();
                 m_activeHeatSource = null;
@@ -105,21 +135,31 @@ namespace VikingClimate.UI
                     m_activeHeatSource = null;
                     m_activeFireImpacted.Clear();
 
-                    if (ModConfig.DebugInstantConduction != null && ModConfig.DebugInstantConduction.Value)
+                    if (ModConfig.InspectAggregatedGraph.Value)
                     {
                         float outdoorWeather = SurvivalManager.CurrentState.Breakdown.OutdoorAmbient;
                         if (outdoorWeather == 0.0f) outdoorWeather = SurvivalManager.CurrentState.AmbientTemperature;
                         var profile = ThermalGraphManager.Instance.GetDwellingProfile(hovered, outdoorWeather);
                         m_activeDwellingProfile = profile;
-
-                        if (ModConfig.HighlightConnectedPieces.Value && profile.AllPieces != null)
-                        {
-                            ApplyDwellingHighlights(hovered, profile.AllPieces);
-                        }
                     }
                     else
                     {
                         m_activeDwellingProfile = null;
+                    }
+
+                    if (m_lockedHeatSource != null)
+                    {
+                        ApplyLockedAndHoverHighlights(m_lockedHeatSource, m_lockedFireImpacted, hovered);
+                    }
+                    else if (ModConfig.InspectAggregatedGraph.Value)
+                    {
+                        if (ModConfig.HighlightConnectedPieces.Value && m_activeDwellingProfile.HasValue && m_activeDwellingProfile.Value.AllPieces != null)
+                        {
+                            ApplyDwellingHighlights(hovered, m_activeDwellingProfile.Value.AllPieces);
+                        }
+                    }
+                    else
+                    {
                         if (ModConfig.HighlightConnectedPieces.Value)
                         {
                             ApplyPieceHighlights(hovered, neighbors);
@@ -139,6 +179,17 @@ namespace VikingClimate.UI
 
         private void ResetSelection()
         {
+            m_activeHovered = null;
+            m_activeNeighbors.Clear();
+            m_activeHeatSource = null;
+            m_activeFireImpacted.Clear();
+
+            if (m_lockedHeatSource != null)
+            {
+                ApplyHeatSourceHighlights(m_lockedHeatSource, m_lockedFireImpacted);
+                return;
+            }
+
             if (m_highlightedObjects.Count > 0)
             {
                 ClearHighlights();
@@ -216,7 +267,21 @@ namespace VikingClimate.UI
                 SetPieceHighlight(hsGo, new Color(1.0f, 0.35f, 0.05f) * 0.90f);
             }
 
-            // 2. Highlight all directly impacted line-of-sight pieces in Radiant Sun Yellow
+            // 2. Find max energy deposited on any single piece to normalize the gradient
+            float maxEnergy = 0.001f;
+            if (heatSource != null)
+            {
+                for (int i = 0; i < impactedPieces.Count; i++)
+                {
+                    int id = impactedPieces[i].InstanceId;
+                    if (heatSource.ImpactedEnergyPerNode.TryGetValue(id, out float e) && e > maxEnergy)
+                    {
+                        maxEnergy = e;
+                    }
+                }
+            }
+
+            // 3. Highlight all directly impacted pieces colored by energy received
             for (int i = 0; i < impactedPieces.Count; i++)
             {
                 var node = impactedPieces[i];
@@ -224,8 +289,109 @@ namespace VikingClimate.UI
                 {
                     GameObject nodeGo = node.PieceRef.gameObject;
                     currentSet.Add(nodeGo);
-                    SetPieceHighlight(nodeGo, new Color(1.0f, 0.85f, 0.20f) * 0.60f);
+
+                    float energy = (heatSource != null && heatSource.ImpactedEnergyPerNode.TryGetValue(node.InstanceId, out float e)) ? e : 0f;
+                    float t = Mathf.Clamp01(energy / maxEnergy);
+
+                    // Two-stage gradient:
+                    // t = 0.0: Pale soft straw/amber (0.35 intensity)
+                    // t = 0.5: Golden yellow (0.65 intensity)
+                    // t = 1.0: Bright fiery radiant deep orange-red (0.95 intensity)
+                    Color highlightColor;
+                    if (t < 0.5f)
+                    {
+                        float subT = t / 0.5f;
+                        highlightColor = Color.Lerp(
+                            new Color(0.92f, 0.88f, 0.60f) * 0.35f, 
+                            new Color(1.0f, 0.75f, 0.15f) * 0.65f, 
+                            subT
+                        );
+                    }
+                    else
+                    {
+                        float subT = (t - 0.5f) / 0.5f;
+                        highlightColor = Color.Lerp(
+                            new Color(1.0f, 0.75f, 0.15f) * 0.65f, 
+                            new Color(1.0f, 0.20f, 0.02f) * 0.95f, 
+                            subT
+                        );
+                    }
+
+                    SetPieceHighlight(nodeGo, highlightColor);
                 }
+            }
+
+            SyncHighlightedObjects(currentSet);
+        }
+
+        private void ApplyLockedAndHoverHighlights(ActiveHeatSource heatSource, List<PieceThermalNode> impactedPieces, PieceThermalNode hoveredPiece)
+        {
+            var currentSet = new HashSet<GameObject>();
+
+            // 1. Highlight heat source in bright radiant fiery Orange/Red
+            if (heatSource != null && heatSource.GameObject != null)
+            {
+                GameObject hsGo = heatSource.GameObject;
+                currentSet.Add(hsGo);
+                SetPieceHighlight(hsGo, new Color(1.0f, 0.35f, 0.05f) * 0.90f);
+            }
+
+            // 2. Find max energy deposited on any single piece
+            float maxEnergy = 0.001f;
+            if (heatSource != null)
+            {
+                for (int i = 0; i < impactedPieces.Count; i++)
+                {
+                    int id = impactedPieces[i].InstanceId;
+                    if (heatSource.ImpactedEnergyPerNode.TryGetValue(id, out float e) && e > maxEnergy)
+                    {
+                        maxEnergy = e;
+                    }
+                }
+            }
+
+            // 3. Highlight all directly impacted pieces colored by energy received
+            for (int i = 0; i < impactedPieces.Count; i++)
+            {
+                var node = impactedPieces[i];
+                if (node.PieceRef != null && node.PieceRef.gameObject != null)
+                {
+                    GameObject nodeGo = node.PieceRef.gameObject;
+                    currentSet.Add(nodeGo);
+
+                    float energy = (heatSource != null && heatSource.ImpactedEnergyPerNode.TryGetValue(node.InstanceId, out float e)) ? e : 0f;
+                    float t = Mathf.Clamp01(energy / maxEnergy);
+
+                    Color highlightColor;
+                    if (t < 0.5f)
+                    {
+                        float subT = t / 0.5f;
+                        highlightColor = Color.Lerp(
+                            new Color(0.92f, 0.88f, 0.60f) * 0.35f, 
+                            new Color(1.0f, 0.75f, 0.15f) * 0.65f, 
+                            subT
+                        );
+                    }
+                    else
+                    {
+                        float subT = (t - 0.5f) / 0.5f;
+                        highlightColor = Color.Lerp(
+                            new Color(1.0f, 0.75f, 0.15f) * 0.65f, 
+                            new Color(1.0f, 0.20f, 0.02f) * 0.95f, 
+                            subT
+                        );
+                    }
+
+                    SetPieceHighlight(nodeGo, highlightColor);
+                }
+            }
+
+            // 4. Highlight hovered piece with distinct bright cursor highlight
+            if (hoveredPiece != null && hoveredPiece.PieceRef != null && hoveredPiece.PieceRef.gameObject != null)
+            {
+                GameObject hGo = hoveredPiece.PieceRef.gameObject;
+                currentSet.Add(hGo);
+                SetPieceHighlight(hGo, new Color(1.0f, 0.95f, 0.35f) * 0.90f);
             }
 
             SyncHighlightedObjects(currentSet);
@@ -305,7 +471,10 @@ namespace VikingClimate.UI
             InitStyles();
 
             // Status indicator in lower-left corner
-            GUI.Label(new Rect(20, Screen.height - 35, 360, 25), $"<color=#80CBC4>[{ModConfig.TogglePieceHoverHotkey.Value}: Piece Thermal Inspection ON]</color>", m_bodyStyle);
+            string modeNotice = ModConfig.InspectAggregatedGraph.Value ? "Connected Graph" : "Single Piece";
+            string toggleKey = ModConfig.ToggleInspectionModeHotkey.Value.ToString();
+            string lockNotice = m_lockedHeatSource != null ? $" <color=#81C784>[Locked to {m_lockedHeatSource.DisplayName}]</color>" : "";
+            GUI.Label(new Rect(20, Screen.height - 35, 550, 25), $"<color=#80CBC4>[{ModConfig.TogglePieceHoverHotkey.Value}: Thermal Inspection ON ({modeNotice} | [{toggleKey}]: Toggle Mode)]</color>{lockNotice}", m_bodyStyle);
 
             if (m_activeHeatSource != null && m_activeHeatSource.GameObject != null)
             {
@@ -324,7 +493,7 @@ namespace VikingClimate.UI
                 outdoorWeather = SurvivalManager.CurrentState.AmbientTemperature - SurvivalManager.CurrentState.FireWarmth;
             }
 
-            if (m_activeDwellingProfile != null && ModConfig.DebugInstantConduction != null && ModConfig.DebugInstantConduction.Value)
+            if (m_activeDwellingProfile != null && ModConfig.InspectAggregatedGraph.Value)
             {
                 RenderInstantDwellingHUD(m_activeDwellingProfile.Value, node, outdoorWeather);
                 return;
@@ -342,7 +511,7 @@ namespace VikingClimate.UI
             }
             string displayName = (Localization.instance != null) ? Localization.instance.Localize(rawName) : rawName;
 
-            // Calculate precise energy balance (Influx vs Outflux)
+            // Calculate precise energy balance (Fire, Joints, Air, Net)
             float directInflux = node.DirectHeatFlux;
             float conductiveInflux = node.ActualConductiveInflux;
             float conductiveOutflux = node.ActualConductiveOutflux;
@@ -379,14 +548,9 @@ namespace VikingClimate.UI
 
             // Physical bidirectional air heat exchange: warm outdoor air heats cold structures, cold air cools warm structures
             float effectiveAirLossCoeff = node.EffectiveAirLossRate;
-            float airTempDiff = outdoorWeather - node.CurrentTemperature;
-            float airFlux = effectiveAirLossCoeff * airTempDiff;
-            float airGain = airFlux > 0f ? airFlux : 0f;
-            float airLoss = airFlux < 0f ? -airFlux : 0f;
-
-            float totalInflux = directInflux + conductiveInflux + airGain;
-            float totalOutflux = airLoss + conductiveOutflux;
-            float netFlux = totalInflux - totalOutflux;
+            float netAir = effectiveAirLossCoeff * (outdoorWeather - node.CurrentTemperature);
+            float netJoints = conductiveInflux - conductiveOutflux;
+            float netFlux = directInflux + netJoints + netAir;
 
             // Physical rate of temperature change (°C / sec)
             float expectedRate = Mathf.Abs(netFlux) / Mathf.Max(1.0f, node.HeatCapacity);
@@ -398,12 +562,14 @@ namespace VikingClimate.UI
             }
             else if (netFlux > 0f)
             {
-                netStatus = $"<color=#FFB74D>Warming (+{netFlux:F1}W | +{expectedRate:F2}°C/s)</color>";
+                netStatus = $"<color=#FFB74D>Warming (+{expectedRate:F2}°C/s)</color>";
             }
             else
             {
-                netStatus = $"<color=#90CAF9>Cooling (-{Mathf.Abs(netFlux):F1}W | -{expectedRate:F2}°C/s)</color>";
+                netStatus = $"<color=#90CAF9>Cooling (-{expectedRate:F2}°C/s)</color>";
             }
+
+            ThermalGraphManager.UpdateNodeCoverAndRoof(node);
 
             string massDesc = node.MaterialType == "Stone" ? "Dense Heat Sink" : (node.MaterialType == "CoreWood" ? "Heavy Timber" : "Wood");
             int insulationPct = Mathf.RoundToInt(node.InsulationFactor * 100f);
@@ -420,19 +586,16 @@ namespace VikingClimate.UI
 
             GUILayout.BeginArea(new Rect(panelX + 14, panelY + 12, panelWidth - 28, panelHeight - 24));
 
-            string influxBreakdown = airGain > 0f
-                ? $"(Air: +{airGain:F1}W | Fire: +{directInflux:F1}W | Joints: +{conductiveInflux:F1}W)"
-                : $"(Fire: +{directInflux:F1}W | Joints: +{conductiveInflux:F1}W)";
+            string fireStr = $"+{directInflux:F1}W";
+            string jointStr = netJoints >= 0f ? $"+{netJoints:F1}W" : $"-{Mathf.Abs(netJoints):F1}W";
+            string airStr = netAir >= 0f ? $"+{netAir:F1}W" : $"-{Mathf.Abs(netAir):F1}W";
+            string netStr = netFlux >= 0f ? $"+{netFlux:F1}W" : $"-{Mathf.Abs(netFlux):F1}W";
 
-            string lossBreakdown = airLoss > 0f
-                ? $"(Air: -{airLoss:F1}W | Joints: -{conductiveOutflux:F1}W)"
-                : $"(Joints: -{conductiveOutflux:F1}W)";
-
-            GUILayout.Label($"<b><color=orange>[ THERMAL INSPECTION ]</color></b> <color=yellow><b>{displayName}</b></color> ({node.MaterialType})", m_headerStyle);
+            GUILayout.Label($"<b><color=orange>[ THERMAL INSPECTION ]</color></b> <color=yellow><b>{displayName}</b></color> ({node.MaterialType}) <color=#B0BEC5>([{toggleKey}]: Graph Mode)</color>", m_headerStyle);
             GUILayout.Label($"• Temperature: <color={tempColor}><b>{node.CurrentTemperature:F1}°C</b></color> (Outdoor Weather: {outdoorWeather:F1}°C | {deltaSign}{delta:F1}°C)", m_bodyStyle);
             GUILayout.Label($"• Material: Mass Capacity <b>{node.HeatCapacity:F0}</b> ({massDesc}) | Conduction <b>{node.MaterialConductivity:F1}</b> | Air Coeff <b>{effectiveAirLossCoeff:F3}</b> (Base {node.AirLossRate:F2})", m_bodyStyle);
             GUILayout.Label($"• Shelter/Insulation: <b>{insulationPct}%</b> ({roofStr} | {insulationDesc} | Cover {node.CoverPercentage * 100f:F0}%)", m_bodyStyle);
-            GUILayout.Label($"• Energy: Influx <b>+{totalInflux:F1}W</b> {influxBreakdown} | Loss <b>-{totalOutflux:F1}W</b> {lossBreakdown}", m_bodyStyle);
+            GUILayout.Label($"• Energy: Fire <b>{fireStr}</b> | Joints <b>{jointStr}</b> | Air <b>{airStr}</b> (Net <b>{netStr}</b>)", m_bodyStyle);
             GUILayout.Label($"• Dynamics: {netStatus} | Neighbors: <b>{validNeighborCount} Connected Pieces</b> (Avg {avgNeighborTemp:F1}°C)", m_bodyStyle);
 
             GUILayout.EndArea();
@@ -485,11 +648,16 @@ namespace VikingClimate.UI
 
             GUILayout.BeginArea(new Rect(panelX + 14, panelY + 12, panelWidth - 28, panelHeight - 24));
 
-            GUILayout.Label($"<b><color=#00E5FF>[ DWELLING THERMAL PROFILE ]</color></b> <color=yellow><b>{displayName}</b></color> (Instant Conduction Active)", m_headerStyle);
+            string toggleKey = ModConfig.ToggleInspectionModeHotkey.Value.ToString();
+            string instantTag = (ModConfig.DebugInstantConduction != null && ModConfig.DebugInstantConduction.Value) ? " <color=#FFB74D>[Instant Conduction]</color>" : "";
+            GUILayout.Label($"<b><color=#00E5FF>[ CONNECTED GRAPH PROFILE ]</color></b> <color=yellow><b>{displayName}</b></color>{instantTag} <color=#B0BEC5>([{toggleKey}]: Single Piece)</color>", m_headerStyle);
             GUILayout.Label($"• Uniform Temperature: <color={tempColor}><b>{profile.UniformTemperature:F1}°C</b></color> (Outdoor Weather: {outdoorWeather:F1}°C | {deltaSign}{delta:F1}°C)", m_bodyStyle);
             GUILayout.Label($"• Structure: <b>{profile.PieceCount} Connected Pieces</b> ({matStr}) | Thermal Mass: <b>{profile.TotalHeatCapacity:F0} J/°C</b>", m_bodyStyle);
             GUILayout.Label($"• Envelope & Cover: <b>{profile.RoofedCount}/{profile.PieceCount} Roofed</b> (Avg Cover {profile.AverageCoverPct * 100f:F0}%) | Total Air Loss Coeff: <b>{profile.TotalAirLossCoeff:F2} W/°C</b>", m_bodyStyle);
-            GUILayout.Label($"• Energy Exchange: Influx <b>+{profile.TotalFireInflux:F1}W</b> (Fires) | Loss <b>-{profile.TotalAirLoss:F1}W</b> (Air) | Net <b>{netSign}{profile.NetFlux:F1}W</b> ({netStatus})", m_bodyStyle);
+            string airExchangeStr = profile.TotalAirGain > 0f 
+                ? $"Gain <b>+{profile.TotalAirGain:F1}W</b> (Air)" 
+                : $"Loss <b>-{profile.TotalAirLoss:F1}W</b> (Air)";
+            GUILayout.Label($"• Energy Exchange: Influx <b>+{profile.TotalFireInflux:F1}W</b> (Fires) | {airExchangeStr} | Net <b>{netSign}{profile.NetFlux:F1}W</b> ({netStatus})", m_bodyStyle);
             GUILayout.Label($"• Projected Equilibrium: <color=yellow><b>{profile.ExpectedEquilibriumTemp:F1}°C</b></color> (Steady-state target where Influx == Air Loss)", m_bodyStyle);
             GUILayout.Label($"• Calibration: <color=#B0BEC5>Adjust Wood/Stone Air Loss in config to shift equilibrium target up or down</color>", m_bodyStyle);
 
@@ -502,16 +670,23 @@ namespace VikingClimate.UI
 
             string displayName = m_activeHeatSource.DisplayName;
             bool isActive = m_activeHeatSource.IsActive;
-            float configuredPower = m_activeHeatSource.Power;
-            float actualPower = isActive ? configuredPower : 0f;
+            float actualPower = isActive ? m_activeHeatSource.Power : 0f;
 
             string statusColor = isActive ? "#81C784" : "#EF5350";
             string statusText = isActive ? m_activeHeatSource.ActiveStatusText : m_activeHeatSource.InactiveStatusText;
 
-            int impactedCount = m_activeFireImpacted.Count;
+            float piecesW = isActive ? m_activeHeatSource.AbsorbedStructureEnergy : 0f;
+            float groundW = isActive ? m_activeHeatSource.AbsorbedGroundEnergy : 0f;
+            float airW = isActive ? m_activeHeatSource.EscapedAirEnergy : 0f;
 
-            int panelWidth = 530;
-            int panelHeight = 150;
+            string lockKey = ModConfig.LockHeatSourceHotkey.Value.ToString();
+            bool isLocked = m_lockedHeatSource != null && m_lockedHeatSource.GameObject == m_activeHeatSource.GameObject;
+            string lockStatus = isLocked 
+                ? $"<color=#81C784>Locked</color> ([{lockKey}] to unlock)" 
+                : $"[{lockKey}] to lock";
+
+            int panelWidth = 480;
+            int panelHeight = 110;
             int panelX = Screen.width - panelWidth - 25 + (int)ModConfig.PieceHoverOffsetX.Value;
             int panelY = Screen.height - panelHeight - 35 - (int)ModConfig.PieceHoverOffsetY.Value;
 
@@ -521,17 +696,9 @@ namespace VikingClimate.UI
             GUILayout.BeginArea(new Rect(panelX + 14, panelY + 12, panelWidth - 28, panelHeight - 24));
 
             GUILayout.Label($"<b><color=#FF7043>[ HEAT SOURCE INSPECTION ]</color></b> <color=yellow><b>{displayName}</b></color>", m_headerStyle);
-            GUILayout.Label($"• State: <color={statusColor}><b>{statusText}</b></color> | Output: <color=#FFA726><b>{actualPower:F0}W</b></color> (Configured: {configuredPower:F0}W)", m_bodyStyle);
-            GUILayout.Label($"• Thermal Reach: <b>16.0m range</b> (128 discrete radiant energy rays across 4π sr)", m_bodyStyle);
-            GUILayout.Label($"• Impacted Structure: <b>{impactedCount} Connected Pieces</b> receiving radiant flux", m_bodyStyle);
-            if (impactedCount > 0)
-            {
-                GUILayout.Label($"• Visual Telemetry: <color=#FFEE58>Yellow highlight on {impactedCount} exposed pieces</color>", m_bodyStyle);
-            }
-            else
-            {
-                GUILayout.Label($"• Visual Telemetry: <color=#90CAF9>No structural building pieces within line of sight</color>", m_bodyStyle);
-            }
+            GUILayout.Label($"• State: <color={statusColor}><b>{statusText}</b></color> | Output: <color=#FFA726><b>{actualPower:F0}W</b></color>", m_bodyStyle);
+            GUILayout.Label($"• Absorption: <color=#FFD54F><b>{piecesW:F0}W Pieces</b></color> | <color=#90CAF9><b>{airW:F0}W Air</b></color> | <color=#BCAAA4><b>{groundW:F0}W Ground</b></color>", m_bodyStyle);
+            GUILayout.Label($"• Display: {lockStatus}", m_bodyStyle);
 
             GUILayout.EndArea();
         }

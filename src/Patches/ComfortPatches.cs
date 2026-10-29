@@ -22,7 +22,8 @@ namespace VikingClimate.Patches
             [HarmonyPrefix]
             public static bool Prefix(Player player, ref int __result)
             {
-                if (!ModConfig.ModEnabled.Value || !ModConfig.EnableStructureComfort.Value || player == null)
+                if (!ModConfig.ModEnabled.Value || !ModConfig.EnableStructureComfort.Value || 
+                    ModConfig.ThermalMassSimulationMode.Value != ThermalMassMode.StructuralGraph || player == null)
                 {
                     return true;
                 }
@@ -42,7 +43,8 @@ namespace VikingClimate.Patches
             [HarmonyPrefix]
             public static bool Prefix(bool inShelter, Vector3 position, ref int __result)
             {
-                if (!ModConfig.ModEnabled.Value || !ModConfig.EnableStructureComfort.Value)
+                if (!ModConfig.ModEnabled.Value || !ModConfig.EnableStructureComfort.Value || 
+                    ModConfig.ThermalMassSimulationMode.Value != ThermalMassMode.StructuralGraph)
                 {
                     return true;
                 }

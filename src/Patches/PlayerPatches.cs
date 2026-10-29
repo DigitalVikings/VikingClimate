@@ -43,7 +43,10 @@ namespace VikingClimate.Patches
         {
             if (__instance != Player.m_localPlayer) return;
             SurvivalManager.OnPlayerSave(__instance);
-            ThermalGraphManager.Instance.SyncAllNodesToZdo();
+            if (ModConfig.ModEnabled.Value && ModConfig.ThermalMassSimulationMode.Value == ThermalMassMode.StructuralGraph)
+            {
+                ThermalGraphManager.Instance.SyncAllNodesToZdo();
+            }
         }
 
         [HarmonyPatch(typeof(Player), "Update")]

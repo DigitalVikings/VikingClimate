@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -83,7 +83,17 @@ namespace VikingClimate.Features.Temperature
         // Insulation & Shelter State (from Cover.GetCoverForPoint)
         public float CoverPercentage { get; set; } = 0.0f;
         public bool UnderRoof { get; set; } = false;
-        public float InsulationFactor => CoverPercentage * (UnderRoof ? 1.0f : (Configuration.ModConfig.InsulationUnroofedFactor != null ? Configuration.ModConfig.InsulationUnroofedFactor.Value : 0.40f));
+        public float RawShelterFactor => CoverPercentage * (UnderRoof ? 1.0f : (Configuration.ModConfig.InsulationUnroofedFactor != null ? Configuration.ModConfig.InsulationUnroofedFactor.Value : 0.40f));
+        public float InsulationFactor
+        {
+            get
+            {
+                float shelter = Mathf.Clamp01(RawShelterFactor);
+                float alpha = Configuration.ModConfig.ShelterAirLossAlpha != null ? Configuration.ModConfig.ShelterAirLossAlpha.Value : 1.0f;
+                if (alpha <= 0.001f) return shelter > 0.001f ? 1.0f : 0.0f;
+                return 1.0f - Mathf.Pow(1.0f - shelter, alpha);
+            }
+        }
         public float EffectiveAirLossRate => AirLossRate * Mathf.Max(0.0f, 1.0f - InsulationFactor);
 
         // Adjacency Graph Edges

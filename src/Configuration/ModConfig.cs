@@ -47,6 +47,8 @@ namespace VikingClimate.Configuration
         public static ConfigEntry<float> FireRayRange { get; private set; } = null!;
         public static ConfigEntry<float> DirectFlameWarmthCoeff { get; private set; } = null!;
         public static ConfigEntry<float> DirectFlameWarmthMax { get; private set; } = null!;
+        public static ConfigEntry<float> ShelterAirLossAlpha { get; private set; } = null!;
+        public static ConfigEntry<OfflineThermalMode> OfflineThermalBehavior { get; private set; } = null!;
         public static ConfigEntry<float> StructuralRelaxationRate { get; private set; } = null!;
 
         // 7 - Material Physical Defaults
@@ -97,7 +99,10 @@ namespace VikingClimate.Configuration
 
         public static ConfigEntry<bool> ShowPieceHoverDebug { get; private set; } = null!;
         public static ConfigEntry<bool> HighlightConnectedPieces { get; private set; } = null!;
+        public static ConfigEntry<bool> InspectAggregatedGraph { get; private set; } = null!;
         public static ConfigEntry<KeyCode> TogglePieceHoverHotkey { get; private set; } = null!;
+        public static ConfigEntry<KeyCode> ToggleInspectionModeHotkey { get; private set; } = null!;
+        public static ConfigEntry<KeyCode> LockHeatSourceHotkey { get; private set; } = null!;
         public static ConfigEntry<float> PieceHoverOffsetX { get; private set; } = null!;
         public static ConfigEntry<float> PieceHoverOffsetY { get; private set; } = null!;
 
@@ -443,6 +448,27 @@ namespace VikingClimate.Configuration
                 "Maximum perceived warmth bonus in Celsius granted by direct line-of-sight flame exposure.",
                 order: 64,
                 new AcceptableValueRange<float>(0.0f, 100.0f),
+                isAdminOnly: true
+            );
+
+            ShelterAirLossAlpha = Bind(
+                config,
+                "6 - Structural Thermal Graph",
+                "ShelterAirLossAlpha",
+                1.0f,
+                "Polynomial exponent (alpha) for the shelter air loss discount: air_loss_discount = 1 - (1 - shelter)^alpha. Default 1.0 represents standard linear scaling. Values between 0.0 and 1.0 require more complete enclosure before granting full insulation benefits.",
+                order: 63,
+                new AcceptableValueRange<float>(0.05f, 5.0f),
+                isAdminOnly: true
+            );
+
+            OfflineThermalBehavior = Bind(
+                config,
+                "6 - Structural Thermal Graph",
+                "OfflineThermalBehavior",
+                OfflineThermalMode.Freeze,
+                "Determines how building temperatures evolve when no player is nearby (e.g. during portal travel, distant exploration, or world reloads). Freeze (default) preserves exact temperatures until the player returns, allowing live simulation to take over. DecayWhenUnlit preserves heat if fires are burning but cools unheated buildings over time. AlwaysDecay constantly decays structures to outdoor weather.",
+                order: 62,
                 isAdminOnly: true
             );
 
@@ -831,6 +857,36 @@ namespace VikingClimate.Configuration
                 isAdminOnly: false
             );
 
+            LockHeatSourceHotkey = Bind(
+                config,
+                "10 - Inspection & Debugging",
+                "LockHeatSourceHotkey",
+                KeyCode.L,
+                "Hotkey to lock heat source highlights and inspection display so you can walk around without aiming at the fire.",
+                order: 25,
+                isAdminOnly: false
+            );
+
+            ToggleInspectionModeHotkey = Bind(
+                config,
+                "10 - Inspection & Debugging",
+                "ToggleInspectionModeHotkey",
+                KeyCode.F8,
+                "Hotkey to toggle between single piece thermal inspection and full connected dwelling graph inspection.",
+                order: 24,
+                isAdminOnly: false
+            );
+
+            InspectAggregatedGraph = Bind(
+                config,
+                "10 - Inspection & Debugging",
+                "InspectAggregatedGraph",
+                false,
+                "When enabled, thermal inspection shows the aggregated stats and highlights for the entire connected graph instead of a single piece.",
+                order: 23,
+                isAdminOnly: false
+            );
+
             PieceHoverOffsetX = Bind(
                 config,
                 "10 - Inspection & Debugging",
@@ -906,5 +962,12 @@ namespace VikingClimate.Configuration
     {
         StructuralGraph,
         Fallback
+    }
+
+    public enum OfflineThermalMode
+    {
+        Freeze,
+        DecayWhenUnlit,
+        AlwaysDecay
     }
 }

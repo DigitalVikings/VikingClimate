@@ -58,11 +58,13 @@ namespace VikingClimate.Features.Temperature
         public string MaterialType { get; }
 
         // Live Thermodynamic State
+        public int ClusterId { get; set; } = 0;
         public float CurrentTemperature { get; set; }
         public float NextTemperature { get; set; }
         public float TempAtStepStart { get; set; }
         public float DeltaEnergy { get; set; }
         public float DirectHeatFlux { get; set; } // Q_i from all line-of-sight fires
+        public float LastSyncedTemperature { get; set; } = -999.0f;
 
         // Phase-Synchronized Conduction Scratch State (Zero-Alloc)
         public float DesiredOutSum { get; set; }
@@ -89,9 +91,9 @@ namespace VikingClimate.Features.Temperature
             get
             {
                 float shelter = Mathf.Clamp01(RawShelterFactor);
-                float alpha = Configuration.ModConfig.ShelterAirLossAlpha != null ? Configuration.ModConfig.ShelterAirLossAlpha.Value : 1.0f;
-                if (alpha <= 0.001f) return shelter > 0.001f ? 1.0f : 0.0f;
-                return 1.0f - Mathf.Pow(1.0f - shelter, alpha);
+                float beta = Configuration.ModConfig.ShelterAirLossBeta != null ? Configuration.ModConfig.ShelterAirLossBeta.Value : 1.0f;
+                if (beta <= 0.001f) return shelter > 0.001f ? 1.0f : 0.0f;
+                return Mathf.Clamp01(shelter / beta);
             }
         }
         public float EffectiveAirLossRate => AirLossRate * Mathf.Max(0.0f, 1.0f - InsulationFactor);
@@ -122,6 +124,7 @@ namespace VikingClimate.Features.Temperature
             MaterialType = materialType;
             CurrentTemperature = initialTemperature;
             NextTemperature = initialTemperature;
+            LastSyncedTemperature = initialTemperature;
         }
 
         public void AddOrUpdateEdge(PieceThermalNode neighbor, float conductivity = 0.0f)

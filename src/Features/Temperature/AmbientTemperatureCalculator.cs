@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using VikingClimate.Configuration;
 using VikingClimate.Core;
+using VikingClimate.Features.Temperature.Services;
 
 namespace VikingClimate.Features.Temperature
 {
@@ -41,11 +43,16 @@ namespace VikingClimate.Features.Temperature
             return Calculate(player, 0.5f, out breakdown);
         }
 
-        public static float Calculate(Player player, float dt, out AmbientThermalBreakdown breakdown)
+        public static float CalculateOutdoorAmbient(Vector3 pos, bool inDungeon = false)
+        {
+            return CalculateOutdoorAmbient(pos, inDungeon, out _);
+        }
+
+        public static float CalculateOutdoorAmbient(Vector3 pos, bool inDungeon, out AmbientThermalBreakdown breakdown)
         {
             breakdown = default;
 
-            if (player == null || EnvMan.instance == null)
+            if (EnvMan.instance == null)
             {
                 breakdown.BiomeName = "None";
                 breakdown.WeatherName = "None";
@@ -53,10 +60,6 @@ namespace VikingClimate.Features.Temperature
                 return 20.0f;
             }
 
-            Vector3 pos = player.transform.position;
-            bool inDungeon = player.InInterior();
-            bool inShelter = player.InShelter();
-            breakdown.IsSheltered = inShelter;
             breakdown.IsSubterranean = inDungeon;
 
             // 1. Biome Baseline Maximum Temperature (17-point Gaussian kernel blend)
@@ -137,6 +140,31 @@ namespace VikingClimate.Features.Temperature
             }
 
             breakdown.OutdoorAmbient = outdoorAmbient;
+            return outdoorAmbient;
+        }
+
+        public static float Calculate(Player player, float dt, out AmbientThermalBreakdown breakdown)
+        {
+            if (player == null || EnvMan.instance == null)
+            {
+                breakdown = default;
+                breakdown.BiomeName = "None";
+                breakdown.WeatherName = "None";
+                breakdown.SeasonName = "None";
+                return 20.0f;
+            }
+
+            Vector3 pos = player.transform.position;
+            bool inDungeon = player.InInterior();
+            bool inShelter = player.InShelter();
+
+            float outdoorAmbient = CalculateOutdoorAmbient(pos, inDungeon, out breakdown);
+            breakdown.IsSheltered = inShelter;
+
+            // 1. Biome Baseline Maximum Temperature
+            float baseTemp = breakdown.BiomeBaseTemp;
+            float altitudeDelta = breakdown.AltitudeDelta;
+            float seasonDelta = breakdown.SeasonDelta;
 
             // 7. Enclosed Structure & Fireplace Heat Convection / Thermal Mass System (Surface dwellings only)
             if (!inDungeon && VikingClimate.Configuration.ModConfig.ThermalMassSimulationMode.Value == VikingClimate.Configuration.ThermalMassMode.StructuralGraph)
@@ -282,11 +310,16 @@ namespace VikingClimate.Features.Temperature
         private static bool _seasonModPresent = false;
 
         /// <summary>
-        /// Checks whether a dedicated Seasons mod (e.g. Seasonality, Seasons by shudnal) is loaded in BepInEx.
+        /// Checks whether a dedicated Seasons mod (e.g. Seasonality, Seasons by shudnal) is loaded in BepInEx and enabled in config.
         /// Prevents stale global keys persisted in the world save from permanently forcing winter in vanilla worlds.
         /// </summary>
         public static bool IsSeasonModInstalled()
         {
+            if (ModConfig.EnableSeasonIntegration != null && !ModConfig.EnableSeasonIntegration.Value)
+            {
+                return false;
+            }
+
             if (!_checkedSeasonMod && BepInEx.Bootstrap.Chainloader.PluginInfos != null)
             {
                 _checkedSeasonMod = true;
@@ -310,6 +343,11 @@ namespace VikingClimate.Features.Temperature
         private static float GetSeasonDelta(Heightmap.Biome biome, out string seasonName)
         {
             seasonName = "Default";
+            if (ModConfig.EnableSeasonIntegration != null && !ModConfig.EnableSeasonIntegration.Value)
+            {
+                return 0.0f;
+            }
+
             float seasonFactor = 0.0f;
 
             if (IsSeasonModInstalled() && ZoneSystem.instance != null)
@@ -413,14 +451,14 @@ namespace VikingClimate.Features.Temperature
 
                     // Verify fireplace is fueled/burning if a Fireplace component is present
                     var fireplace = area.GetComponentInParent<Fireplace>();
-                    if (fireplace != null && !fireplace.IsBurning())
+                    if (fireplace != null && !ThermalMaterialDatabase.IsFireplaceLit(fireplace))
                     {
                         continue;
                     }
 
                     // Verify smelter is fueled/active if a Smelter component is present
                     var smelter = area.GetComponentInParent<Smelter>();
-                    if (smelter != null && (smelter.m_windmill != null || !smelter.IsActive()))
+                    if (smelter != null && (smelter.m_windmill != null || !ThermalMaterialDatabase.IsSmelterActive(smelter)))
                     {
                         continue;
                     }

@@ -39,6 +39,7 @@ namespace VikingClimate.Core
         public const string KeyPrefix = "VikingClimate_";
         public const string KeyBodyWarmth = KeyPrefix + "BodyWarmth";
         public const string LegacyKeyBodyWarmth = "VikingSurvival_BodyWarmth";
+        public const string KeyDeathReset = KeyPrefix + "DeathReset";
 
         /// <summary>
         /// Peripheral / thermal equilibrium warmth in Celsius.

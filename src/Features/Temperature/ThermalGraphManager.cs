@@ -131,6 +131,7 @@ namespace VikingClimate.Features.Temperature
         private readonly List<ActiveHeatSource> m_trackedHeatSources = new List<ActiveHeatSource>();
         public IReadOnlyList<ActiveHeatSource> TrackedHeatSources => m_trackedHeatSources;
         private readonly List<Piece> m_tempPieces = new List<Piece>();
+        private readonly List<int> m_deadKeys = new List<int>(32);
 
         private bool m_isCycleActive = true;
         private int m_cycleStepsRemaining = 25;
@@ -151,6 +152,18 @@ namespace VikingClimate.Features.Temperature
 
         public bool IsCycleActive => m_isCycleActive;
         public int NodeCount => m_nodes.Count;
+        public IReadOnlyDictionary<int, PieceThermalNode> Nodes => m_nodes;
+
+        public bool TryGetNode(int instanceId, out PieceThermalNode? node)
+        {
+            if (m_nodes.TryGetValue(instanceId, out var n))
+            {
+                node = n;
+                return true;
+            }
+            node = null;
+            return false;
+        }
 
         private float m_lastAmbientTemp = 10.0f;
 
@@ -214,6 +227,36 @@ namespace VikingClimate.Features.Temperature
                     if (ModConfig.ThermalMassSimulationMode.Value != ThermalMassMode.StructuralGraph)
                     {
                         Clear();
+                    }
+                };
+            }
+
+            if (ModConfig.EnableHeatRaycasting != null)
+            {
+                ModConfig.EnableHeatRaycasting.SettingChanged += (sender, args) =>
+                {
+                    RecalculateAllDirectHeat();
+                    WakeCycle(25);
+                };
+            }
+
+            if (ModConfig.EnableHeatConvection != null)
+            {
+                ModConfig.EnableHeatConvection.SettingChanged += (sender, args) =>
+                {
+                    RecalculateAllDirectHeat();
+                    WakeCycle(25);
+                };
+            }
+
+            if (ModConfig.InstantGraphEquilibrium != null)
+            {
+                ModConfig.InstantGraphEquilibrium.SettingChanged += (sender, args) =>
+                {
+                    if (ModConfig.InstantGraphEquilibrium.Value)
+                    {
+                        SolveSteadyStateEquilibrium(m_lastAmbientTemp);
+                        WakeCycle(25);
                     }
                 };
             }
@@ -320,6 +363,11 @@ namespace VikingClimate.Features.Temperature
             foreach (var kvp in m_nodes)
             {
                 PieceThermalNode node = kvp.Value;
+                if (Mathf.Abs(node.CurrentTemperature - node.LastSyncedTemperature) < 0.25f)
+                {
+                    continue; // Piece temperature is in thermal steady-state; skip redundant network ZDO sync
+                }
+
                 ZDO? zdo = null;
 
                 if (node.PieceRef != null && node.PieceRef.gameObject != null)
@@ -340,6 +388,7 @@ namespace VikingClimate.Features.Temperature
                 {
                     zdo.Set(s_zdoKeyTemp, node.CurrentTemperature);
                     zdo.Set(s_zdoKeyTime, nowBits);
+                    node.LastSyncedTemperature = node.CurrentTemperature;
                 }
             }
         }
@@ -409,17 +458,17 @@ namespace VikingClimate.Features.Temperature
         public void ScanNearbyPieces(Vector3 center, float ambientTemp)
         {
             // Prune dead piece references
-            var deadKeys = new List<int>();
+            m_deadKeys.Clear();
             foreach (var kvp in m_nodes)
             {
                 if (kvp.Value.PieceRef == null || kvp.Value.PieceRef.gameObject == null)
                 {
-                    deadKeys.Add(kvp.Key);
+                    m_deadKeys.Add(kvp.Key);
                 }
             }
-            for (int i = 0; i < deadKeys.Count; i++)
+            for (int i = 0; i < m_deadKeys.Count; i++)
             {
-                m_nodes.Remove(deadKeys[i]);
+                m_nodes.Remove(m_deadKeys[i]);
             }
 
             // Index active fires first so heat sources are known during piece initialization
@@ -630,8 +679,60 @@ namespace VikingClimate.Features.Temperature
         public void UpdateActiveFires(Vector3 center) =>
             HeatRaycaster.UpdateActiveFires(center, m_trackedHeatSources, m_nodes, m_pieceLayerMask, m_raycastLayerMask, m_terrainLayer, WakeCycle);
 
-        private void RecalculateAllDirectHeat() =>
-            HeatRaycaster.RecalculateAllDirectHeat(m_trackedHeatSources, m_nodes, m_raycastLayerMask, m_terrainLayer, WakeCycle);
+        public void RecalculateAllDirectHeat()
+        {
+            foreach (var kvp in m_nodes)
+            {
+                kvp.Value.DirectHeatFlux = 0.0f;
+            }
+
+            for (int i = 0; i < m_trackedHeatSources.Count; i++)
+            {
+                var hs = m_trackedHeatSources[i];
+                hs.ImpactedNodeIds.Clear();
+                hs.ImpactedEnergyPerNode.Clear();
+                hs.AbsorbedStructureEnergy = 0.0f;
+                hs.AbsorbedGroundEnergy = 0.0f;
+                hs.EscapedAirEnergy = 0.0f;
+            }
+
+            bool anyFireActive = false;
+            for (int i = 0; i < m_trackedHeatSources.Count; i++)
+            {
+                if (m_trackedHeatSources[i].IsActive && m_trackedHeatSources[i].GameObject != null)
+                {
+                    anyFireActive = true;
+                    break;
+                }
+            }
+
+            if (!anyFireActive) return;
+
+            bool raycastEnabled = ModConfig.EnableHeatRaycasting != null && ModConfig.EnableHeatRaycasting.Value;
+            bool convectionEnabled = ModConfig.EnableHeatConvection == null || ModConfig.EnableHeatConvection.Value;
+
+            if (raycastEnabled)
+            {
+                for (int i = 0; i < m_trackedHeatSources.Count; i++)
+                {
+                    ActiveHeatSource source = m_trackedHeatSources[i];
+                    if (source.IsActive && source.GameObject != null)
+                    {
+                        HeatRaycaster.CastHeatSourceRays(source, m_nodes, m_raycastLayerMask, m_terrainLayer);
+                    }
+                }
+            }
+
+            if (convectionEnabled)
+            {
+                ConvectiveHeatPropagator.ExecuteConvection(m_trackedHeatSources, m_nodes, m_pieceLayerMask);
+            }
+
+            if (raycastEnabled || convectionEnabled)
+            {
+                WakeCycle(15);
+            }
+        }
 
         public void CastHeatSourceRays(ActiveHeatSource source, bool recordOnly = false, List<PieceThermalNode>? impactedOut = null) =>
             HeatRaycaster.CastHeatSourceRays(source, m_nodes, m_raycastLayerMask, m_terrainLayer, recordOnly, impactedOut);
@@ -641,6 +742,9 @@ namespace VikingClimate.Features.Temperature
 
         public void EqualizeConnectedComponents() =>
             ThermalRelaxationSolver.EqualizeConnectedComponents(m_nodes);
+
+        public void SolveSteadyStateEquilibrium(float ambientTemp) =>
+            ThermalRelaxationSolver.SolveSteadyStateEquilibrium(m_nodes, ambientTemp);
 
         private void StepRelaxationIteration(float ambientTemp) =>
             ThermalRelaxationSolver.StepRelaxationIteration(m_nodes, ambientTemp, ref m_lastMaxDeltaT, ref m_cycleStepsRemaining, ref m_isCycleActive);
@@ -807,6 +911,33 @@ namespace VikingClimate.Features.Temperature
         public DwellingThermalProfile GetDwellingProfile(PieceThermalNode startNode, float outdoorWeather) =>
             DwellingAnalyzer.GetDwellingProfile(startNode, outdoorWeather, m_nodes);
 
+        public float GetAverageTemperatureAroundPoint(Vector3 point, float radius = 8.0f)
+        {
+            var pieces = new List<Piece>();
+            Piece.GetAllPiecesInRadius(point, radius, pieces);
+            if (pieces.Count == 0 && radius < 16.0f)
+            {
+                Piece.GetAllPiecesInRadius(point, 16.0f, pieces);
+            }
+
+            float totalTemp = 0.0f;
+            float totalWeight = 0.0f;
+
+            for (int i = 0; i < pieces.Count; i++)
+            {
+                Piece p = pieces[i];
+                if (p == null || p.gameObject == null) continue;
+                if (m_nodes.TryGetValue(p.gameObject.GetInstanceID(), out var node))
+                {
+                    float cap = Mathf.Max(1.0f, node.HeatCapacity);
+                    totalTemp += node.CurrentTemperature * cap;
+                    totalWeight += cap;
+                }
+            }
+
+            return totalWeight > 0.0f ? (totalTemp / totalWeight) : float.NaN;
+        }
+
         private ActiveHeatSource? GetTrackedHeatSource(int instanceId)
         {
             for (int i = 0; i < m_trackedHeatSources.Count; i++)
@@ -823,11 +954,34 @@ namespace VikingClimate.Features.Temperature
         private int CountTotalEdges() =>
             ThermalRelaxationSolver.CountTotalEdges(m_nodes);
 
-        public List<PieceThermalNode> GetHeatSourceImpactedPieces(ActiveHeatSource source) =>
-            HeatRaycaster.GetHeatSourceImpactedPieces(source, m_nodes, m_raycastLayerMask, m_terrainLayer);
+        public List<PieceThermalNode> GetHeatSourceImpactedPieces(ActiveHeatSource source)
+        {
+            bool raycastEnabled = ModConfig.EnableHeatRaycasting != null && ModConfig.EnableHeatRaycasting.Value;
+            bool convectionEnabled = ModConfig.EnableHeatConvection == null || ModConfig.EnableHeatConvection.Value;
+
+            if (convectionEnabled && !raycastEnabled)
+            {
+                return ConvectiveHeatPropagator.GetHeatSourceImpactedPieces(source, m_nodes, m_pieceLayerMask);
+            }
+            if (raycastEnabled && !convectionEnabled)
+            {
+                return HeatRaycaster.GetHeatSourceImpactedPieces(source, m_nodes, m_raycastLayerMask, m_terrainLayer);
+            }
+            if (raycastEnabled && convectionEnabled)
+            {
+                var combined = new HashSet<PieceThermalNode>(ConvectiveHeatPropagator.GetHeatSourceImpactedPieces(source, m_nodes, m_pieceLayerMask));
+                var rayImpacted = HeatRaycaster.GetHeatSourceImpactedPieces(source, m_nodes, m_raycastLayerMask, m_terrainLayer);
+                for (int i = 0; i < rayImpacted.Count; i++)
+                {
+                    combined.Add(rayImpacted[i]);
+                }
+                return new List<PieceThermalNode>(combined);
+            }
+            return new List<PieceThermalNode>();
+        }
 
         public List<PieceThermalNode> GetFireplaceImpactedPieces(Fireplace fp) =>
-            HeatRaycaster.GetFireplaceImpactedPieces(fp, m_nodes, m_raycastLayerMask, m_terrainLayer);
+            GetHeatSourceImpactedPieces(new ActiveHeatSource(fp));
 
         public HashSet<PieceThermalNode> ExpandConnectedDwelling(PieceThermalNode startNode, float ambientTemp, float maxDistance = 100.0f) =>
             DwellingAnalyzer.ExpandConnectedDwelling(startNode, ambientTemp, m_nodes, m_pieceLayerMask, (p, a, w) => RegisterPiece(p, a, w), maxDistance);

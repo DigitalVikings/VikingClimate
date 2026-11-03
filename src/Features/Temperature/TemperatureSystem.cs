@@ -255,6 +255,28 @@ namespace VikingClimate.Features.Temperature
             }
         }
 
+        public static void ResetStatusOnDeath(Player player)
+        {
+            _damageTickTimer = 0f;
+            if (!string.IsNullOrEmpty(_currentActiveStatusId))
+            {
+                StatusEffectRegistry.Remove(player, _currentActiveStatusId);
+                _currentActiveStatusId = null;
+            }
+        }
+
+        public static void OnPlayerRespawnReset(Player player, float targetWarmth)
+        {
+            ResetStatusOnDeath(player);
+
+            var state = SurvivalManager.CurrentState;
+            state.BodyWarmth = targetWarmth;
+            state.AmbientTemperature = targetWarmth;
+            state.SaveToPlayer(player);
+
+            VikingClimatePlugin.Log.LogInfo($"[TemperatureSystem] Reset player '{player.GetPlayerName()}' temperature to {targetWarmth:F1}°C upon respawn.");
+        }
+
         private static void FormatGlossarySection(Player player, StringBuilder sb)
         {
             if (player == null || player != Player.m_localPlayer) return;
@@ -359,8 +381,11 @@ namespace VikingClimate.Features.Temperature
             sb.AppendLine($"    <color=#A0A0A0>└─ Gear Insulation: {insulDesc}</color>");
 
             // 3. Gear Cold Insulation
-            float insulPct = state.InsulationRating * 100.0f;
-            string insulNote = state.HasFrostMead ? " <color=#81D4FA>(+80% Frost Mead)</color>" : (insulPct > 0.5f ? "" : " <i>(Unprotected)</i>");
+            float currentInsulation = GearInsulationRegistry.CalculatePlayerInsulation(player, out bool hasFrostMead);
+            state.InsulationRating = currentInsulation;
+            state.HasFrostMead = hasFrostMead;
+            float insulPct = currentInsulation * 100.0f;
+            string insulNote = hasFrostMead ? " <color=#81D4FA>(+80% Frost Mead)</color>" : (insulPct > 0.5f ? "" : " <i>(Unprotected)</i>");
             sb.AppendLine($"• <b>Gear Cold Insulation</b>: <color=yellow>{insulPct:F0}%</color>{insulNote}");
 
             // 4. Ambient Feels-Like with complete hierarchical breakdown (4 spaces indented per Rule 9)

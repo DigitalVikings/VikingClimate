@@ -104,7 +104,7 @@ namespace VikingClimate.Features.Temperature.Services
                 }
             }
 
-            RecalculateAllDirectHeat(trackedHeatSources, nodes, raycastLayerMask, terrainLayer, wakeCycle);
+            ThermalGraphManager.Instance.RecalculateAllDirectHeat();
         }
 
         public static void RecalculateAllDirectHeat(

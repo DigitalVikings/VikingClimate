@@ -16,6 +16,7 @@ namespace VikingClimate.Features.Temperature
         private ParticleSystem? _particles;
         private ParticleSystemRenderer? _renderer;
         private Transform? _emitterTransform;
+        private Material? _allocatedMaterial;
 
         private float _breathTimer = 0f;
         private float _nextBreathInterval = 3.8f;
@@ -118,7 +119,8 @@ namespace VikingClimate.Features.Temperature
                         ?? freezing.GetComponentInChildren<ParticleSystemRenderer>();
                     if (psr != null && psr.sharedMaterial != null)
                     {
-                        _renderer.material = new Material(psr.sharedMaterial);
+                        _allocatedMaterial = new Material(psr.sharedMaterial);
+                        _renderer.sharedMaterial = _allocatedMaterial;
                         return;
                     }
                 }
@@ -132,7 +134,8 @@ namespace VikingClimate.Features.Temperature
                     var psr = fallbackPrefab.GetComponentInChildren<ParticleSystemRenderer>();
                     if (psr != null && psr.sharedMaterial != null)
                     {
-                        _renderer.material = new Material(psr.sharedMaterial);
+                        _allocatedMaterial = new Material(psr.sharedMaterial);
+                        _renderer.sharedMaterial = _allocatedMaterial;
                         return;
                     }
                 }
@@ -190,9 +193,10 @@ namespace VikingClimate.Features.Temperature
 
         private void OnDestroy()
         {
-            if (_renderer != null && _renderer.material != null)
+            if (_allocatedMaterial != null)
             {
-                Destroy(_renderer.material);
+                Destroy(_allocatedMaterial);
+                _allocatedMaterial = null;
             }
             if (_particles != null && _particles.gameObject != null)
             {

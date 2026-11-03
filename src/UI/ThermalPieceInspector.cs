@@ -44,8 +44,17 @@ namespace VikingClimate.UI
             ClearHighlights();
         }
 
+        private static bool IsTyping()
+        {
+            return (Chat.instance != null && Chat.instance.HasFocus())
+                || TextInput.IsVisible()
+                || Console.IsVisible();
+        }
+
         private void Update()
         {
+            if (IsTyping()) return;
+
             // Toggle inspection display via hotkey
             if (Input.GetKeyDown(ModConfig.TogglePieceHoverHotkey.Value))
             {
@@ -86,7 +95,7 @@ namespace VikingClimate.UI
                 ModConfig.InspectAggregatedGraph.Value = !ModConfig.InspectAggregatedGraph.Value;
             }
 
-            if (!ModConfig.ShowPieceHoverDebug.Value || Player.m_localPlayer == null)
+            if (!ModConfig.ShowPieceHoverDebug.Value || Player.m_localPlayer == null || Player.m_localPlayer.IsDead())
             {
                 if (m_highlightedObjects.Count > 0)
                 {
@@ -464,17 +473,58 @@ namespace VikingClimate.UI
             m_highlightedObjects.Clear();
         }
 
+        private static Texture2D? s_darkBgTex;
+        private static Texture2D? s_borderTex;
+
+        private static void EnsureTextures()
+        {
+            if (s_darkBgTex == null)
+            {
+                s_darkBgTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+                // Deep Dark Slate / Charcoal #0F172A with ~90% opacity for snow contrast
+                s_darkBgTex.SetPixel(0, 0, new Color(0.059f, 0.090f, 0.165f, 0.90f));
+                s_darkBgTex.Apply();
+            }
+            if (s_borderTex == null)
+            {
+                s_borderTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+                // Subtle slate border #334155 with 85% opacity
+                s_borderTex.SetPixel(0, 0, new Color(0.200f, 0.255f, 0.333f, 0.85f));
+                s_borderTex.Apply();
+            }
+        }
+
+        private static void DrawDarkPanel(Rect rect, float borderWidth = 1f)
+        {
+            EnsureTextures();
+            if (borderWidth > 0f)
+            {
+                GUI.DrawTexture(rect, s_borderTex!);
+                Rect inner = new Rect(rect.x + borderWidth, rect.y + borderWidth, rect.width - (borderWidth * 2f), rect.height - (borderWidth * 2f));
+                GUI.DrawTexture(inner, s_darkBgTex!);
+            }
+            else
+            {
+                GUI.DrawTexture(rect, s_darkBgTex!);
+            }
+        }
+
         private void OnGUI()
         {
-            if (!ModConfig.ShowPieceHoverDebug.Value || Player.m_localPlayer == null) return;
+            if (!ModConfig.ShowPieceHoverDebug.Value || Player.m_localPlayer == null || Player.m_localPlayer.IsDead()) return;
 
             InitStyles();
 
-            // Status indicator in lower-left corner
+            // Status indicator in lower-left corner with dark background badge
             string modeNotice = ModConfig.InspectAggregatedGraph.Value ? "Connected Graph" : "Single Piece";
             string toggleKey = ModConfig.ToggleInspectionModeHotkey.Value.ToString();
             string lockNotice = m_lockedHeatSource != null ? $" <color=#81C784>[Locked to {m_lockedHeatSource.DisplayName}]</color>" : "";
-            GUI.Label(new Rect(20, Screen.height - 35, 550, 25), $"<color=#80CBC4>[{ModConfig.TogglePieceHoverHotkey.Value}: Thermal Inspection ON ({modeNotice} | [{toggleKey}]: Toggle Mode)]</color>{lockNotice}", m_bodyStyle);
+            string statusText = $"<color=#80CBC4>[{ModConfig.TogglePieceHoverHotkey.Value}: Thermal Inspection ON ({modeNotice} | [{toggleKey}]: Toggle Mode)]</color>{lockNotice}";
+
+            float badgeWidth = m_lockedHeatSource != null ? 680f : 550f;
+            Rect statusBadgeRect = new Rect(16, Screen.height - 38, badgeWidth, 26);
+            DrawDarkPanel(statusBadgeRect, 1f);
+            GUI.Label(new Rect(statusBadgeRect.x + 8, statusBadgeRect.y + 3, statusBadgeRect.width - 16, 20), statusText, m_bodyStyle);
 
             if (m_activeHeatSource != null && m_activeHeatSource.GameObject != null)
             {
@@ -571,18 +621,18 @@ namespace VikingClimate.UI
 
             ThermalGraphManager.UpdateNodeCoverAndRoof(node);
 
-            string massDesc = node.MaterialType == "Stone" ? "Dense Heat Sink" : (node.MaterialType == "CoreWood" ? "Heavy Timber" : "Wood");
+            string massDesc = node.MaterialType == "Stone" ? "Dense Heat Sink" : (node.MaterialType == "Metal" ? "Conductive Metal" : (node.MaterialType == "Crystal" ? "Fragile Crystal" : (node.MaterialType == "CoreWood" ? "Heavy Timber" : "Wood")));
             int insulationPct = Mathf.RoundToInt(node.InsulationFactor * 100f);
             string roofStr = node.UnderRoof ? "Roofed" : "Open Sky";
             string insulationDesc = insulationPct >= 70 ? "<color=#81C784>Enclosed</color>" : (insulationPct >= 35 ? "<color=#FFB74D>Partial</color>" : "<color=#EF5350>Exposed</color>");
 
             int panelWidth = 560;
-            int panelHeight = 180;
+            int panelHeight = 186;
             int panelX = Screen.width - panelWidth - 25 + (int)ModConfig.PieceHoverOffsetX.Value;
             int panelY = Screen.height - panelHeight - 35 - (int)ModConfig.PieceHoverOffsetY.Value;
 
             Rect panelRect = new Rect(panelX, panelY, panelWidth, panelHeight);
-            GUI.Box(panelRect, GUIContent.none, m_boxStyle!);
+            DrawDarkPanel(panelRect, 1f);
 
             GUILayout.BeginArea(new Rect(panelX + 14, panelY + 12, panelWidth - 28, panelHeight - 24));
 
@@ -639,12 +689,12 @@ namespace VikingClimate.UI
             }
 
             int panelWidth = 640;
-            int panelHeight = 210;
+            int panelHeight = 216;
             int panelX = Screen.width - panelWidth - 25 + (int)ModConfig.PieceHoverOffsetX.Value;
             int panelY = Screen.height - panelHeight - 35 - (int)ModConfig.PieceHoverOffsetY.Value;
 
             Rect panelRect = new Rect(panelX, panelY, panelWidth, panelHeight);
-            GUI.Box(panelRect, GUIContent.none, m_boxStyle!);
+            DrawDarkPanel(panelRect, 1f);
 
             GUILayout.BeginArea(new Rect(panelX + 14, panelY + 12, panelWidth - 28, panelHeight - 24));
 
@@ -686,12 +736,12 @@ namespace VikingClimate.UI
                 : $"[{lockKey}] to lock";
 
             int panelWidth = 480;
-            int panelHeight = 110;
+            int panelHeight = 115;
             int panelX = Screen.width - panelWidth - 25 + (int)ModConfig.PieceHoverOffsetX.Value;
             int panelY = Screen.height - panelHeight - 35 - (int)ModConfig.PieceHoverOffsetY.Value;
 
             Rect panelRect = new Rect(panelX, panelY, panelWidth, panelHeight);
-            GUI.Box(panelRect, GUIContent.none, m_boxStyle!);
+            DrawDarkPanel(panelRect, 1f);
 
             GUILayout.BeginArea(new Rect(panelX + 14, panelY + 12, panelWidth - 28, panelHeight - 24));
 
@@ -705,19 +755,23 @@ namespace VikingClimate.UI
 
         private void InitStyles()
         {
-            if (m_boxStyle == null)
+            if (m_headerStyle == null)
             {
-                Texture2D bg = new Texture2D(1, 1);
-                bg.SetPixel(0, 0, new Color(0.08f, 0.08f, 0.11f, 0.88f));
-                bg.Apply();
+                EnsureTextures();
 
-                m_boxStyle = new GUIStyle(GUI.skin.box);
-                m_boxStyle.normal.background = bg;
+                m_boxStyle = new GUIStyle(GUI.skin.box)
+                {
+                    border = new RectOffset(0, 0, 0, 0),
+                    margin = new RectOffset(0, 0, 0, 0),
+                    padding = new RectOffset(0, 0, 0, 0)
+                };
+                m_boxStyle.normal.background = s_darkBgTex;
 
                 m_headerStyle = new GUIStyle(GUI.skin.label)
                 {
                     fontSize = 13,
-                    fontStyle = FontStyle.Bold
+                    fontStyle = FontStyle.Bold,
+                    richText = true
                 };
                 m_headerStyle.normal.textColor = Color.white;
 
@@ -726,7 +780,7 @@ namespace VikingClimate.UI
                     fontSize = 12,
                     richText = true
                 };
-                m_bodyStyle.normal.textColor = new Color(0.88f, 0.88f, 0.88f);
+                m_bodyStyle.normal.textColor = new Color(0.92f, 0.94f, 0.96f);
             }
         }
     }

@@ -29,12 +29,25 @@ namespace VikingClimate.Patches
                 __instance.gameObject.AddComponent<ThermalPieceInspector>();
             }
 
+            if (__instance.GetComponent<PieceInsulationVisualizer>() == null)
+            {
+                __instance.gameObject.AddComponent<PieceInsulationVisualizer>();
+            }
+
             if (Hud.instance != null)
             {
                 HUDThermometer.AttachToHud(Hud.instance);
                 ScreenFrostOverlay.AttachToHud(Hud.instance);
                 ScreenHeatOverlay.AttachToHud(Hud.instance);
             }
+        }
+
+        [HarmonyPatch(typeof(Player), nameof(Player.OnDeath))]
+        [HarmonyPostfix]
+        private static void OnPlayerDeath(Player __instance)
+        {
+            if (__instance != Player.m_localPlayer) return;
+            SurvivalManager.OnPlayerDeath(__instance);
         }
 
         [HarmonyPatch(typeof(Player), nameof(Player.Save), typeof(ZPackage))]

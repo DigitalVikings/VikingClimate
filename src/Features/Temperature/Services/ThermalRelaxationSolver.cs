@@ -70,6 +70,48 @@ namespace VikingClimate.Features.Temperature.Services
         }
 
         /// <summary>
+        /// Assigns a deterministic cluster ID to each connected component of structural pieces in the thermal graph.
+        /// Pieces sharing the same cluster ID belong to the same snapped/connected dwelling structure.
+        /// </summary>
+        public static void UpdateClusterIds(Dictionary<int, PieceThermalNode> nodes)
+        {
+            s_componentVisited.Clear();
+            int currentClusterId = 1;
+
+            foreach (var kvp in nodes)
+            {
+                PieceThermalNode start = kvp.Value;
+                if (start.PieceRef == null || start.PieceRef.gameObject == null) continue;
+                if (s_componentVisited.Contains(start.InstanceId)) continue;
+
+                s_clusterQueue.Clear();
+                s_clusterQueue.Enqueue(start);
+                s_componentVisited.Add(start.InstanceId);
+                start.ClusterId = currentClusterId;
+
+                while (s_clusterQueue.Count > 0)
+                {
+                    PieceThermalNode curr = s_clusterQueue.Dequeue();
+                    for (int e = 0; e < curr.Edges.Count; e++)
+                    {
+                        var edge = curr.Edges[e];
+                        PieceThermalNode neighbor = edge.Target;
+                        if (neighbor.PieceRef != null && neighbor.PieceRef.gameObject != null)
+                        {
+                            if (s_componentVisited.Add(neighbor.InstanceId))
+                            {
+                                neighbor.ClusterId = currentClusterId;
+                                s_clusterQueue.Enqueue(neighbor);
+                            }
+                        }
+                    }
+                }
+
+                currentClusterId++;
+            }
+        }
+
+        /// <summary>
         /// Instantly equalizes temperatures across all physically connected building pieces within each connected dwelling cluster.
         /// Treats each connected component as a unified thermal mass (infinite joint conductivity), strictly conserving thermal energy.
         /// </summary>
@@ -131,6 +173,236 @@ namespace VikingClimate.Features.Temperature.Services
         }
 
         /// <summary>
+        /// Solves the true thermodynamic steady-state equilibrium for each connected building cluster.
+        /// Analytically computes the lumped steady-state equilibrium temperature (T_eq = T_ambient + Q_fire / AirLoss_total)
+        /// so cold huts immediately jump to their sustained operating warmth, then runs a gentle, bounded relaxation
+        /// pass (at most 5 iterations) to establish initial spatial conduction gradients without CPU spikes.
+        /// Used for one-shot equilibrium resets when the toggle is flipped or a fireplace is registered.
+        /// </summary>
+        public static void SolveSteadyStateEquilibrium(Dictionary<int, PieceThermalNode> nodes, float ambientTemp)
+        {
+            s_componentVisited.Clear();
+
+            // 1. Analytical Lumped Steady-State Equilibrium per Cluster
+            foreach (var kvp in nodes)
+            {
+                PieceThermalNode start = kvp.Value;
+                if (start.PieceRef == null || start.PieceRef.gameObject == null) continue;
+                if (s_componentVisited.Contains(start.InstanceId)) continue;
+
+                s_currentCluster.Clear();
+                s_clusterQueue.Clear();
+
+                s_clusterQueue.Enqueue(start);
+                s_componentVisited.Add(start.InstanceId);
+
+                float totalFire = 0.0f;
+                float totalAirCoeff = 0.0f;
+
+                while (s_clusterQueue.Count > 0)
+                {
+                    PieceThermalNode curr = s_clusterQueue.Dequeue();
+                    s_currentCluster.Add(curr);
+
+                    totalFire += curr.DirectHeatFlux;
+                    totalAirCoeff += curr.EffectiveAirLossRate;
+
+                    for (int e = 0; e < curr.Edges.Count; e++)
+                    {
+                        var edge = curr.Edges[e];
+                        PieceThermalNode neighbor = edge.Target;
+                        if (neighbor.PieceRef != null && neighbor.PieceRef.gameObject != null)
+                        {
+                            if (s_componentVisited.Add(neighbor.InstanceId))
+                            {
+                                s_clusterQueue.Enqueue(neighbor);
+                            }
+                        }
+                    }
+                }
+
+                float equilibriumTemp = ambientTemp;
+                if (totalAirCoeff > 0.001f)
+                {
+                    equilibriumTemp = ambientTemp + (totalFire / totalAirCoeff);
+                }
+                equilibriumTemp = Mathf.Clamp(equilibriumTemp, ambientTemp - 15.0f, ambientTemp + 95.0f);
+
+                for (int i = 0; i < s_currentCluster.Count; i++)
+                {
+                    var p = s_currentCluster[i];
+                    p.CurrentTemperature = equilibriumTemp;
+                    p.NextTemperature = equilibriumTemp;
+                    p.TempAtStepStart = equilibriumTemp;
+                    p.ActualConductiveInflux = 0.0f;
+                    p.ActualConductiveOutflux = 0.0f;
+                }
+            }
+
+            // 2. Converge spatial conduction gradients across distance gently (at most 5 iterations)
+            float dummyMaxDelta = 0.0f;
+            for (int iter = 0; iter < 5; iter++)
+            {
+                StepStandardRelaxation(nodes, ambientTemp, ref dummyMaxDelta, dtMultiplier: 2.0f);
+                if (dummyMaxDelta < 0.02f) break;
+            }
+        }
+
+        private static void StepStandardRelaxation(Dictionary<int, PieceThermalNode> nodes, float ambientTemp, ref float lastMaxDeltaT, float dtMultiplier = 1.0f)
+        {
+            float baseDt = ModConfig.StructuralRelaxationRate != null ? ModConfig.StructuralRelaxationRate.Value : 1.0f;
+            float dt = baseDt * dtMultiplier;
+
+            // Phase 1: Parallel Environmental Exchange
+            foreach (var kvp in nodes)
+            {
+                PieceThermalNode node = kvp.Value;
+                if (node.PieceRef == null || node.PieceRef.gameObject == null) continue;
+
+                node.TempAtStepStart = node.CurrentTemperature;
+                node.DeltaEnergy = 0.0f;
+                node.DesiredOutSum = 0.0f;
+                node.DesiredInSum = 0.0f;
+                node.MinColdNeighborTemp = float.MaxValue;
+                node.MaxHotNeighborTemp = float.MinValue;
+                node.ScaleOut = 1.0f;
+                node.ScaleIn = 1.0f;
+                node.ActualConductiveInflux = 0.0f;
+                node.ActualConductiveOutflux = 0.0f;
+
+                if (node.DirectHeatFlux > 0.001f)
+                {
+                    node.DeltaEnergy += node.DirectHeatFlux * dt;
+                }
+
+                float airFlux = node.EffectiveAirLossRate * (ambientTemp - node.CurrentTemperature);
+                node.DeltaEnergy += airFlux * dt;
+            }
+
+            // Phase 2: Accumulate Desired Conduction & Neighbor Extrema
+            foreach (var kvp in nodes)
+            {
+                PieceThermalNode nodeA = kvp.Value;
+                if (nodeA.PieceRef == null || nodeA.PieceRef.gameObject == null) continue;
+
+                for (int e = 0; e < nodeA.Edges.Count; e++)
+                {
+                    var edge = nodeA.Edges[e];
+                    PieceThermalNode nodeB = edge.Target;
+                    if (nodeB.PieceRef == null || nodeB.PieceRef.gameObject == null) continue;
+
+                    if (nodeA.InstanceId >= nodeB.InstanceId) continue;
+
+                    float deltaT = nodeA.CurrentTemperature - nodeB.CurrentTemperature;
+                    if (Mathf.Abs(deltaT) < 0.001f) continue;
+
+                    PieceThermalNode hot = deltaT > 0.0f ? nodeA : nodeB;
+                    PieceThermalNode cold = deltaT > 0.0f ? nodeB : nodeA;
+                    float absDelta = Mathf.Abs(deltaT);
+
+                    float desiredEnergy = edge.InterfaceConductivity * absDelta * dt;
+
+                    hot.DesiredOutSum += desiredEnergy;
+                    cold.DesiredInSum += desiredEnergy;
+
+                    if (cold.CurrentTemperature < hot.MinColdNeighborTemp)
+                    {
+                        hot.MinColdNeighborTemp = cold.CurrentTemperature;
+                    }
+
+                    if (hot.CurrentTemperature > cold.MaxHotNeighborTemp)
+                    {
+                        cold.MaxHotNeighborTemp = hot.CurrentTemperature;
+                    }
+                }
+            }
+
+            // Phase 3: Dual-Capacity Node Scaling Factors
+            foreach (var kvp in nodes)
+            {
+                PieceThermalNode node = kvp.Value;
+                if (node.PieceRef == null || node.PieceRef.gameObject == null) continue;
+
+                float cap = Mathf.Max(1.0f, node.HeatCapacity);
+
+                if (node.DesiredOutSum > 0.001f && node.MinColdNeighborTemp < float.MaxValue)
+                {
+                    float maxShed = cap * Mathf.Max(0.0f, node.CurrentTemperature - node.MinColdNeighborTemp) * 0.45f;
+                    if (node.DesiredOutSum > maxShed)
+                    {
+                        node.ScaleOut = maxShed / node.DesiredOutSum;
+                    }
+                }
+
+                if (node.DesiredInSum > 0.001f && node.MaxHotNeighborTemp > float.MinValue)
+                {
+                    float maxAbsorb = cap * Mathf.Max(0.0f, node.MaxHotNeighborTemp - node.CurrentTemperature) * 0.45f;
+                    if (node.DesiredInSum > maxAbsorb)
+                    {
+                        node.ScaleIn = maxAbsorb / node.DesiredInSum;
+                    }
+                }
+            }
+
+            // Phase 4: Symmetrically Scaled Pairwise Conduction Execution
+            foreach (var kvp in nodes)
+            {
+                PieceThermalNode nodeA = kvp.Value;
+                if (nodeA.PieceRef == null || nodeA.PieceRef.gameObject == null) continue;
+
+                for (int e = 0; e < nodeA.Edges.Count; e++)
+                {
+                    var edge = nodeA.Edges[e];
+                    PieceThermalNode nodeB = edge.Target;
+                    if (nodeB.PieceRef == null || nodeB.PieceRef.gameObject == null) continue;
+
+                    if (nodeA.InstanceId >= nodeB.InstanceId) continue;
+
+                    float deltaT = nodeA.CurrentTemperature - nodeB.CurrentTemperature;
+                    if (Mathf.Abs(deltaT) < 0.001f) continue;
+
+                    PieceThermalNode hot = deltaT > 0.0f ? nodeA : nodeB;
+                    PieceThermalNode cold = deltaT > 0.0f ? nodeB : nodeA;
+                    float absDelta = Mathf.Abs(deltaT);
+
+                    float desiredEnergy = edge.InterfaceConductivity * absDelta * dt;
+                    float scale = Mathf.Min(hot.ScaleOut, cold.ScaleIn);
+                    float actualEnergy = desiredEnergy * scale;
+
+                    hot.DeltaEnergy -= actualEnergy;
+                    cold.DeltaEnergy += actualEnergy;
+
+                    float watts = actualEnergy / Mathf.Max(0.001f, dt);
+                    hot.ActualConductiveOutflux += watts;
+                    cold.ActualConductiveInflux += watts;
+                }
+            }
+
+            // Phase 5: Commit Temperature Updates
+            float maxDeltaThisSecond = 0.0f;
+            foreach (var kvp in nodes)
+            {
+                PieceThermalNode node = kvp.Value;
+                if (node.PieceRef == null || node.PieceRef.gameObject == null) continue;
+
+                float cap = Mathf.Max(1.0f, node.HeatCapacity);
+                float deltaT = node.DeltaEnergy / cap;
+                float nextTemp = node.CurrentTemperature + deltaT;
+
+                nextTemp = Mathf.Clamp(nextTemp, ambientTemp - 15.0f, ambientTemp + 95.0f);
+                node.CurrentTemperature = nextTemp;
+
+                float totalNodeDelta = Mathf.Abs(nextTemp - node.TempAtStepStart);
+                if (totalNodeDelta > maxDeltaThisSecond)
+                {
+                    maxDeltaThisSecond = totalNodeDelta;
+                }
+            }
+
+            lastMaxDeltaT = maxDeltaThisSecond;
+        }
+
+        /// <summary>
         /// Performs a symmetric, dual-bounded discrete structural relaxation step across all registered pieces.
         /// Separates environmental flux (fire/air) from structural conduction, and applies dual-capacity
         /// donor/recipient scaling to guarantee 100% spatial symmetry, zero oscillation, and exact energy conservation.
@@ -143,6 +415,69 @@ namespace VikingClimate.Features.Temperature.Services
             ref bool isCycleActive)
         {
             float dt = ModConfig.StructuralRelaxationRate != null ? ModConfig.StructuralRelaxationRate.Value : 1.0f;
+
+            // Instant equilibrium debug mode: Gentle accelerated relaxation toward cluster equilibrium
+            // Runs a single accelerated relaxation step (3x rate) plus a gentle analytical bias (15% lerp) toward cluster equilibrium.
+            // Guarantees zero frame drops while reaching equilibrium smoothly and rapidly within seconds.
+            if (ModConfig.InstantGraphEquilibrium != null && ModConfig.InstantGraphEquilibrium.Value)
+            {
+                StepStandardRelaxation(nodes, ambientTemp, ref lastMaxDeltaT, dtMultiplier: 3.0f);
+
+                // Gentle analytical bias toward lumped equilibrium for each cluster
+                s_componentVisited.Clear();
+                foreach (var kvp in nodes)
+                {
+                    PieceThermalNode start = kvp.Value;
+                    if (start.PieceRef == null || start.PieceRef.gameObject == null) continue;
+                    if (s_componentVisited.Contains(start.InstanceId)) continue;
+
+                    s_currentCluster.Clear();
+                    s_clusterQueue.Clear();
+
+                    s_clusterQueue.Enqueue(start);
+                    s_componentVisited.Add(start.InstanceId);
+
+                    float totalFire = 0.0f;
+                    float totalAirCoeff = 0.0f;
+
+                    while (s_clusterQueue.Count > 0)
+                    {
+                        PieceThermalNode curr = s_clusterQueue.Dequeue();
+                        s_currentCluster.Add(curr);
+
+                        totalFire += curr.DirectHeatFlux;
+                        totalAirCoeff += curr.EffectiveAirLossRate;
+
+                        for (int e = 0; e < curr.Edges.Count; e++)
+                        {
+                            var edge = curr.Edges[e];
+                            PieceThermalNode neighbor = edge.Target;
+                            if (neighbor.PieceRef != null && neighbor.PieceRef.gameObject != null)
+                            {
+                                if (s_componentVisited.Add(neighbor.InstanceId))
+                                {
+                                    s_clusterQueue.Enqueue(neighbor);
+                                }
+                            }
+                        }
+                    }
+
+                    if (totalAirCoeff > 0.001f)
+                    {
+                        float clusterTarget = Mathf.Clamp(ambientTemp + (totalFire / totalAirCoeff), ambientTemp - 15.0f, ambientTemp + 95.0f);
+                        for (int i = 0; i < s_currentCluster.Count; i++)
+                        {
+                            var p = s_currentCluster[i];
+                            // Smooth 15% nudge per tick toward cluster equilibrium baseline
+                            p.CurrentTemperature = Mathf.Lerp(p.CurrentTemperature, clusterTarget, 0.15f);
+                        }
+                    }
+                }
+
+                if (cycleStepsRemaining > 0) cycleStepsRemaining--;
+                if (lastMaxDeltaT < 0.02f && cycleStepsRemaining <= 0) isCycleActive = false;
+                return;
+            }
 
             // Debug instant conduction mode: Lumped Thermal Mass (Infinite Joint Conduction)
             if (ModConfig.DebugInstantConduction != null && ModConfig.DebugInstantConduction.Value)

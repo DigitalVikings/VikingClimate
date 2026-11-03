@@ -8,7 +8,7 @@
     <AssemblyName>VikingClimate</AssemblyName>
     <RootNamespace>VikingClimate</RootNamespace>
     <Product>VikingClimate</Product>
-    <Version>0.2.2</Version>
+    <Version>0.3.0</Version>
     <Authors>DigitalVikings</Authors>
     <LangVersion>11</LangVersion>
     <Nullable>enable</Nullable>
@@ -96,8 +96,10 @@
       <Private>false</Private>
     </Reference>
     <Reference Include="Jotunn">
-      <HintPath Condition="Exists('$(APPDATA)\r2modmanPlus-local\Valheim\profiles\$(R2ModmanProfile)\BepInEx\plugins\ValheimModding-Jotunn\Jotunn.dll')">$(APPDATA)\r2modmanPlus-local\Valheim\profiles\$(R2ModmanProfile)\BepInEx\plugins\ValheimModding-Jotunn\Jotunn.dll</HintPath>
-      <HintPath Condition="!Exists('$(APPDATA)\r2modmanPlus-local\Valheim\profiles\$(R2ModmanProfile)\BepInEx\plugins\ValheimModding-Jotunn\Jotunn.dll')">$(APPDATA)\r2modmanPlus-local\Valheim\profiles\DEV\BepInEx\plugins\ValheimModding-Jotunn\Jotunn.dll</HintPath>
+      <HintPath Condition="Exists('$(ProfilePluginsDir)\ValheimModding-Jotunn\Jotunn.dll')">$(ProfilePluginsDir)\ValheimModding-Jotunn\Jotunn.dll</HintPath>
+      <HintPath Condition="!Exists('$(ProfilePluginsDir)\ValheimModding-Jotunn\Jotunn.dll') and Exists('$(APPDATA)\com.kesomannen.gale\valheim\profiles\$(Profile)\BepInEx\plugins\ValheimModding-Jotunn\Jotunn.dll')">$(APPDATA)\com.kesomannen.gale\valheim\profiles\$(Profile)\BepInEx\plugins\ValheimModding-Jotunn\Jotunn.dll</HintPath>
+      <HintPath Condition="!Exists('$(ProfilePluginsDir)\ValheimModding-Jotunn\Jotunn.dll') and Exists('$(APPDATA)\r2modmanPlus-local\Valheim\profiles\$(R2ModmanProfile)\BepInEx\plugins\ValheimModding-Jotunn\Jotunn.dll')">$(APPDATA)\r2modmanPlus-local\Valheim\profiles\$(R2ModmanProfile)\BepInEx\plugins\ValheimModding-Jotunn\Jotunn.dll</HintPath>
+      <HintPath Condition="!Exists('$(ProfilePluginsDir)\ValheimModding-Jotunn\Jotunn.dll') and !Exists('$(APPDATA)\r2modmanPlus-local\Valheim\profiles\$(R2ModmanProfile)\BepInEx\plugins\ValheimModding-Jotunn\Jotunn.dll')">$(APPDATA)\r2modmanPlus-local\Valheim\profiles\DEV\BepInEx\plugins\ValheimModding-Jotunn\Jotunn.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

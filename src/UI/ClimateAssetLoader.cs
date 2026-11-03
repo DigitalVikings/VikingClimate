@@ -59,6 +59,7 @@ namespace VikingClimate.UI
             }
 
             byte[]? data = null;
+            string source = "none";
             string normalizedPath = relativePath.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
             if (!normalizedPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
             {
@@ -69,12 +70,36 @@ namespace VikingClimate.UI
             try
             {
                 string pluginDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? "";
-                string diskPath = Path.Combine(pluginDir, "assets", normalizedPath);
-                if (File.Exists(diskPath))
+                if (!string.IsNullOrEmpty(pluginDir))
                 {
-                    data = File.ReadAllBytes(diskPath);
+                    string diskPath = Path.Combine(pluginDir, "assets", normalizedPath);
+                    if (File.Exists(diskPath))
+                    {
+                        data = File.ReadAllBytes(diskPath);
+                        source = $"plugin dir: {diskPath}";
+                    }
                 }
-                else
+
+                if (data == null && !string.IsNullOrEmpty(BepInEx.Paths.PluginPath))
+                {
+                    string bepPath = Path.Combine(BepInEx.Paths.PluginPath, "VikingClimate", "assets", normalizedPath);
+                    if (File.Exists(bepPath))
+                    {
+                        data = File.ReadAllBytes(bepPath);
+                        source = $"bepinex plugin dir: {bepPath}";
+                    }
+                    else
+                    {
+                        string bepRootPath = Path.Combine(BepInEx.Paths.PluginPath, "assets", normalizedPath);
+                        if (File.Exists(bepRootPath))
+                        {
+                            data = File.ReadAllBytes(bepRootPath);
+                            source = $"bepinex root assets: {bepRootPath}";
+                        }
+                    }
+                }
+
+                if (data == null)
                 {
                     // Check local project directory (for testing / development)
                     string currentDir = Directory.GetCurrentDirectory();
@@ -82,6 +107,7 @@ namespace VikingClimate.UI
                     if (File.Exists(devPath))
                     {
                         data = File.ReadAllBytes(devPath);
+                        source = $"dev path: {devPath}";
                     }
                     else
                     {
@@ -89,6 +115,7 @@ namespace VikingClimate.UI
                         if (File.Exists(climateDevPath))
                         {
                             data = File.ReadAllBytes(climateDevPath);
+                            source = $"climate dev path: {climateDevPath}";
                         }
                     }
                 }
@@ -111,6 +138,7 @@ namespace VikingClimate.UI
                         using var ms = new MemoryStream();
                         stream.CopyTo(ms);
                         data = ms.ToArray();
+                        source = $"embedded resource: {resName}";
                     }
                 }
                 catch (Exception ex)
@@ -121,6 +149,7 @@ namespace VikingClimate.UI
 
             if (data == null || data.Length == 0)
             {
+                VikingClimatePlugin.Log.LogWarning($"[ClimateAssetLoader] Failed to locate texture data for '{relativePath}'.");
                 return null;
             }
 
@@ -128,10 +157,14 @@ namespace VikingClimate.UI
             if (tex.LoadImage(data))
             {
                 tex.name = Path.GetFileNameWithoutExtension(relativePath);
+                tex.filterMode = FilterMode.Bilinear;
+                tex.wrapMode = TextureWrapMode.Clamp;
                 s_textureCache[relativePath] = tex;
+                VikingClimatePlugin.Log.LogInfo($"[ClimateAssetLoader] Loaded asset '{relativePath}' from {source} ({tex.width}x{tex.height}).");
                 return tex;
             }
 
+            VikingClimatePlugin.Log.LogWarning($"[ClimateAssetLoader] ImageConversion.LoadImage failed for '{relativePath}' ({data.Length} bytes from {source}).");
             return null;
         }
     }

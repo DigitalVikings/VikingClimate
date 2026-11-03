@@ -36,6 +36,7 @@ namespace VikingClimate.Features.Temperature.Services
                 case "Stone": return ModConfig.MatStoneHeatCapacity != null ? ModConfig.MatStoneHeatCapacity.Value : 800.0f;
                 case "Metal": return ModConfig.MatMetalHeatCapacity != null ? ModConfig.MatMetalHeatCapacity.Value : 500.0f;
                 case "CoreWood": return ModConfig.MatCoreWoodHeatCapacity != null ? ModConfig.MatCoreWoodHeatCapacity.Value : 400.0f;
+                case "Crystal": return ModConfig.MatCrystalHeatCapacity != null ? ModConfig.MatCrystalHeatCapacity.Value : 60.0f;
                 default: return ModConfig.MatWoodHeatCapacity != null ? ModConfig.MatWoodHeatCapacity.Value : 200.0f;
             }
         }
@@ -47,6 +48,7 @@ namespace VikingClimate.Features.Temperature.Services
                 case "Stone": return ModConfig.MatStoneAirLoss != null ? ModConfig.MatStoneAirLoss.Value : 1.0f;
                 case "Metal": return ModConfig.MatMetalAirLoss != null ? ModConfig.MatMetalAirLoss.Value : 1.0f;
                 case "CoreWood": return ModConfig.MatCoreWoodAirLoss != null ? ModConfig.MatCoreWoodAirLoss.Value : 2.0f;
+                case "Crystal": return ModConfig.MatCrystalAirLoss != null ? ModConfig.MatCrystalAirLoss.Value : 3.5f;
                 default: return ModConfig.MatWoodAirLoss != null ? ModConfig.MatWoodAirLoss.Value : 2.0f;
             }
         }
@@ -58,6 +60,7 @@ namespace VikingClimate.Features.Temperature.Services
                 case "Stone": return ModConfig.MatStoneConductivity != null ? ModConfig.MatStoneConductivity.Value : 75.0f;
                 case "Metal": return ModConfig.MatMetalConductivity != null ? ModConfig.MatMetalConductivity.Value : 120.0f;
                 case "CoreWood": return ModConfig.MatCoreWoodConductivity != null ? ModConfig.MatCoreWoodConductivity.Value : 55.0f;
+                case "Crystal": return ModConfig.MatCrystalConductivity != null ? ModConfig.MatCrystalConductivity.Value : 50.0f;
                 default: return ModConfig.MatWoodConductivity != null ? ModConfig.MatWoodConductivity.Value : 40.0f;
             }
         }
@@ -69,6 +72,7 @@ namespace VikingClimate.Features.Temperature.Services
                 case "Stone": return ModConfig.MatStoneAbsorption != null ? ModConfig.MatStoneAbsorption.Value : 1.0f;
                 case "Metal": return ModConfig.MatMetalAbsorption != null ? ModConfig.MatMetalAbsorption.Value : 1.0f;
                 case "CoreWood": return ModConfig.MatCoreWoodAbsorption != null ? ModConfig.MatCoreWoodAbsorption.Value : 1.0f;
+                case "Crystal": return ModConfig.MatCrystalAbsorption != null ? ModConfig.MatCrystalAbsorption.Value : 0.85f;
                 default: return ModConfig.MatWoodAbsorption != null ? ModConfig.MatWoodAbsorption.Value : 1.0f;
             }
         }
@@ -93,7 +97,11 @@ namespace VikingClimate.Features.Temperature.Services
         {
             string name = (piece.m_name ?? piece.gameObject.name).ToLowerInvariant();
 
-            if (name.Contains("stone") || name.Contains("hearth") || name.Contains("rock") ||
+            if (name.Contains("crystal") || name.Contains("glass"))
+            {
+                matType = "Crystal";
+            }
+            else if (name.Contains("stone") || name.Contains("hearth") || name.Contains("rock") ||
                 name.Contains("ashland") || name.Contains("grausten") || name.Contains("marble") ||
                 (name.Contains("stone") && name.Contains("fence")))
             {
@@ -139,45 +147,63 @@ namespace VikingClimate.Features.Temperature.Services
 
         public static bool IsFireplaceLit(Fireplace fp)
         {
-            if (fp == null || fp.gameObject == null) return false;
-            if (fp.IsBurning()) return true;
+            if (fp == null || !fp || fp.gameObject == null) return false;
 
-            // If transiently blocked by smoke (m_blocked), check if it has fuel and is in burning state
-            ZNetView nview = fp.GetComponent<ZNetView>();
-            if (nview != null && nview.IsValid())
+            try
             {
-                ZDO zdo = nview.GetZDO();
-                if (zdo != null)
+                ZNetView nview = fp.GetComponent<ZNetView>();
+                if (nview != null && nview.IsValid() && nview.GetZDO() != null)
                 {
-                    bool isStateOn = zdo.GetInt(ZDOVars.s_state, 0) == 1;
-                    float fuel = zdo.GetFloat(ZDOVars.s_fuel, 0f);
-                    if (isStateOn && (fuel > 0f || fp.m_infiniteFuel))
+                    if (fp.IsBurning()) return true;
+
+                    // If transiently blocked by smoke (m_blocked), check if it has fuel and is toggled on (vanilla default state is 1)
+                    ZDO zdo = nview.GetZDO();
+                    if (zdo != null)
                     {
-                        return true;
+                        bool isStateOn = zdo.GetInt(ZDOVars.s_state, 1) == 1;
+                        float fuel = zdo.GetFloat(ZDOVars.s_fuel, 0f);
+                        if (isStateOn && (fuel > 0f || fp.m_infiniteFuel))
+                        {
+                            return true;
+                        }
                     }
                 }
             }
+            catch (Exception)
+            {
+                // Defensive: Ignore transient uninitialized ZNetView / ZDO errors during sector load/unload
+            }
+
             return false;
         }
 
         public static bool IsSmelterActive(Smelter sm)
         {
-            if (sm == null || sm.gameObject == null || sm.m_windmill != null) return false;
-            if (sm.IsActive()) return true;
+            if (sm == null || !sm || sm.gameObject == null || sm.m_windmill != null) return false;
 
-            ZNetView nview = sm.GetComponent<ZNetView>();
-            if (nview != null && nview.IsValid())
+            try
             {
-                ZDO zdo = nview.GetZDO();
-                if (zdo != null)
+                ZNetView nview = sm.GetComponent<ZNetView>();
+                if (nview != null && nview.IsValid() && nview.GetZDO() != null)
                 {
-                    float fuel = zdo.GetFloat(ZDOVars.s_fuel, 0f);
-                    int queued = zdo.GetInt(ZDOVars.s_queued, 0);
-                    bool hasFuel = sm.m_maxFuel == 0 || fuel > 0f;
-                    bool hasOre = sm.m_maxOre == 0 || queued > 0;
-                    return hasFuel && hasOre;
+                    if (sm.IsActive()) return true;
+
+                    ZDO zdo = nview.GetZDO();
+                    if (zdo != null)
+                    {
+                        float fuel = zdo.GetFloat(ZDOVars.s_fuel, 0f);
+                        int queued = zdo.GetInt(ZDOVars.s_queued, 0);
+                        bool hasFuel = sm.m_maxFuel == 0 || fuel > 0f;
+                        bool hasOre = sm.m_maxOre == 0 || queued > 0;
+                        return hasFuel && hasOre;
+                    }
                 }
             }
+            catch (Exception)
+            {
+                // Defensive: Ignore transient uninitialized ZNetView / ZDO errors during sector load/unload
+            }
+
             return false;
         }
 
@@ -248,6 +274,7 @@ namespace VikingClimate.Features.Temperature.Services
                 name.Contains("stair") || name.Contains("ladder") || name.Contains("step") ||
                 name.Contains("arch") ||
                 name.Contains("door") || name.Contains("gate") ||
+                name.Contains("crystal") || name.Contains("glass") || name.Contains("window") ||
                 name.Contains("shingle") || name.Contains("thatch") || name.Contains("slate") ||
                 name.Contains("scale_") || name.Contains("stave_") ||
                 name.Contains("stone_") || name.Contains("grausten_") || name.Contains("marble_") || name.Contains("dvergr_"))

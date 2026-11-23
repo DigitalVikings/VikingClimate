@@ -1,5 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Linq.Expressions;
+using System.Reflection;
+using BepInEx;
+using BepInEx.Configuration;
 using UnityEngine;
 using VikingClimate.Configuration;
 using VikingClimate.Core;
@@ -7,6 +11,207 @@ using VikingClimate.Features.Temperature.Services;
 
 namespace VikingClimate.Features.Temperature
 {
+    /// <summary>
+    /// Zero-hard-dependency reflection soft-bridge to VikingWards (com.digitalvikings.vikingwards).
+    /// Binds compiled delegates once when VikingWards is present so Thor Tier 3 (Stormcaller's Aegis)
+    /// weather immunity is evaluated with zero per-frame reflection or boxing allocations.
+    /// </summary>
+    internal static class VikingWardsBridge
+    {
+        private const string VikingWardsGuid = "com.digitalvikings.vikingwards";
+
+        private static bool s_initChecked;
+        private static bool s_pendingDeferredBind;
+        private static bool s_available;
+        private static PluginInfo? s_cachedPluginInfo;
+
+        private static Func<Player, bool>? s_isPlayerInThorT3;
+        private static Func<Vector3, bool>? s_isPosInThorT3;
+        private static Func<bool>? s_isThorWeatherImmunityEnabled;
+
+        /// <summary>
+        /// Probes BepInEx Chainloader once at startup and binds compiled delegates if VikingWards is loaded.
+        /// If VikingWards is scheduled to Awake after VikingClimate, defers final delegate compilation to the
+        /// first in-world query (executed strictly once).
+        /// </summary>
+        public static void Init()
+        {
+            if (s_initChecked) return;
+            s_initChecked = true;
+
+            try
+            {
+                var pluginInfos = BepInEx.Bootstrap.Chainloader.PluginInfos;
+                if (pluginInfos == null || !pluginInfos.TryGetValue(VikingWardsGuid, out PluginInfo? pluginInfo) || pluginInfo == null)
+                {
+                    return;
+                }
+
+                s_cachedPluginInfo = pluginInfo;
+
+                Assembly? wardAsm = ResolveLoadedAssembly(pluginInfo);
+                if (wardAsm != null)
+                {
+                    BindDelegates(wardAsm);
+                }
+                else
+                {
+                    // VikingWards is installed but has not completed Awake() yet in Chainloader order.
+                    s_pendingDeferredBind = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                VikingClimatePlugin.Log.LogWarning($"[VikingWardsBridge] Failed during startup probe: {ex.Message}");
+                s_available = false;
+                s_pendingDeferredBind = false;
+            }
+        }
+
+        public static bool IsPlayerProtectedByThorAegis(Player? player)
+        {
+            if (player == null) return false;
+            if (s_pendingDeferredBind)
+            {
+                CompleteDeferredBind();
+            }
+
+            if (!s_available || s_isPlayerInThorT3 == null) return false;
+            if (s_isThorWeatherImmunityEnabled != null && !s_isThorWeatherImmunityEnabled()) return false;
+            return s_isPlayerInThorT3(player);
+        }
+
+        public static bool IsPositionProtectedByThorAegis(Vector3 position)
+        {
+            if (s_pendingDeferredBind)
+            {
+                CompleteDeferredBind();
+            }
+
+            if (!s_available || s_isPosInThorT3 == null) return false;
+            if (s_isThorWeatherImmunityEnabled != null && !s_isThorWeatherImmunityEnabled()) return false;
+            return s_isPosInThorT3(position);
+        }
+
+        private static void CompleteDeferredBind()
+        {
+            s_pendingDeferredBind = false;
+            try
+            {
+                if (s_cachedPluginInfo == null) return;
+                Assembly? wardAsm = ResolveLoadedAssembly(s_cachedPluginInfo);
+                if (wardAsm != null)
+                {
+                    BindDelegates(wardAsm);
+                }
+                else
+                {
+                    VikingClimatePlugin.Log.LogWarning("[VikingWardsBridge] VikingWards plugin detected but assembly could not be resolved.");
+                }
+            }
+            catch (Exception ex)
+            {
+                VikingClimatePlugin.Log.LogWarning($"[VikingWardsBridge] Deferred bridge bind failed: {ex.Message}");
+                s_available = false;
+            }
+        }
+
+        private static Assembly? ResolveLoadedAssembly(PluginInfo pluginInfo)
+        {
+            if (pluginInfo.Instance != null)
+            {
+                return pluginInfo.Instance.GetType().Assembly;
+            }
+
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length; i++)
+            {
+                if (assemblies[i].GetType("VikingWards.Conduits.WardConduitManager", throwOnError: false) != null)
+                {
+                    return assemblies[i];
+                }
+            }
+
+            return null;
+        }
+
+        private static void BindDelegates(Assembly wardAsm)
+        {
+            Type? managerType = wardAsm.GetType("VikingWards.Conduits.WardConduitManager", throwOnError: false);
+            Type? deityType = wardAsm.GetType("VikingWards.Conduits.DeityType", throwOnError: false);
+            Type? configType = wardAsm.GetType("VikingWards.Configuration.ModConfig", throwOnError: false);
+
+            if (managerType == null || deityType == null || !deityType.IsEnum)
+            {
+                VikingClimatePlugin.Log.LogWarning("[VikingWardsBridge] Could not resolve WardConduitManager or DeityType.");
+                return;
+            }
+
+            object thorValue = Enum.Parse(deityType, "Thor");
+
+            MethodInfo? isPlayerMethod = managerType.GetMethod(
+                "IsPlayerInsideActiveWard",
+                BindingFlags.Public | BindingFlags.Static,
+                null,
+                new[] { typeof(Player), deityType, typeof(int) },
+                null);
+
+            MethodInfo? isPosMethod = managerType.GetMethod(
+                "IsPositionInsideActiveWard",
+                BindingFlags.Public | BindingFlags.Static,
+                null,
+                new[] { typeof(Vector3), deityType, typeof(int) },
+                null);
+
+            if (isPlayerMethod == null && isPosMethod == null)
+            {
+                VikingClimatePlugin.Log.LogWarning("[VikingWardsBridge] Could not find WardConduitManager active ward query methods.");
+                return;
+            }
+
+            if (isPlayerMethod != null)
+            {
+                ParameterExpression playerParam = Expression.Parameter(typeof(Player), "player");
+                MethodCallExpression callExpr = Expression.Call(
+                    isPlayerMethod,
+                    playerParam,
+                    Expression.Constant(thorValue, deityType),
+                    Expression.Constant(3, typeof(int)));
+                s_isPlayerInThorT3 = Expression.Lambda<Func<Player, bool>>(callExpr, playerParam).Compile();
+            }
+
+            if (isPosMethod != null)
+            {
+                ParameterExpression posParam = Expression.Parameter(typeof(Vector3), "pos");
+                MethodCallExpression callExpr = Expression.Call(
+                    isPosMethod,
+                    posParam,
+                    Expression.Constant(thorValue, deityType),
+                    Expression.Constant(3, typeof(int)));
+                s_isPosInThorT3 = Expression.Lambda<Func<Vector3, bool>>(callExpr, posParam).Compile();
+            }
+
+            if (configType != null)
+            {
+                FieldInfo? weatherCfgField = configType.GetField("ThorTier3WeatherImmunity", BindingFlags.Public | BindingFlags.Static);
+                if (weatherCfgField != null && weatherCfgField.FieldType == typeof(ConfigEntry<bool>))
+                {
+                    PropertyInfo? valueProp = typeof(ConfigEntry<bool>).GetProperty(nameof(ConfigEntry<bool>.Value));
+                    if (valueProp != null)
+                    {
+                        MemberExpression fieldExpr = Expression.Field(null, weatherCfgField);
+                        BinaryExpression isNullExpr = Expression.Equal(fieldExpr, Expression.Constant(null, typeof(ConfigEntry<bool>)));
+                        MemberExpression valExpr = Expression.Property(fieldExpr, valueProp);
+                        BinaryExpression orElseExpr = Expression.OrElse(isNullExpr, valExpr);
+                        s_isThorWeatherImmunityEnabled = Expression.Lambda<Func<bool>>(orElseExpr).Compile();
+                    }
+                }
+            }
+
+            s_available = true;
+            VikingClimatePlugin.Log.LogInfo("[VikingWardsBridge] Soft-bridge bound to VikingWards (Thor Tier 3: Stormcaller's Aegis).");
+        }
+    }
     /// <summary>
     /// Calculates the ambient 'feels-like' temperature experienced by the local player.
     /// Incorporates a 17-point dual-ring Gaussian biome kernel for seamless spatial blending,
@@ -157,9 +362,30 @@ namespace VikingClimate.Features.Temperature
             Vector3 pos = player.transform.position;
             bool inDungeon = player.InInterior();
             bool inShelter = player.InShelter();
+            bool thorWeatherProtected = !inDungeon && VikingWardsBridge.IsPlayerProtectedByThorAegis(player);
 
             float outdoorAmbient = CalculateOutdoorAmbient(pos, inDungeon, out breakdown);
             breakdown.IsSheltered = inShelter;
+
+            // VikingWards soft-bridge: Thor Tier 3 (Stormcaller's Aegis) shields the player from storms,
+            // outdoor wind-chill, and sub-zero freezing ambient temperatures while inside the ward dome.
+            bool debugFreezeAmbient = VikingClimate.Configuration.ModConfig.DebugFreezeAmbientTemp != null &&
+                                      VikingClimate.Configuration.ModConfig.DebugFreezeAmbientTemp.Value;
+            if (thorWeatherProtected && !debugFreezeAmbient)
+            {
+                if (breakdown.WeatherDelta < 0.0f)
+                {
+                    outdoorAmbient -= breakdown.WeatherDelta;
+                    breakdown.WeatherDelta = 0.0f;
+                }
+                breakdown.RawWindSpeedKmh = 0.0f;
+                breakdown.WindChillDelta = 0.0f;
+                if (outdoorAmbient < 1.0f)
+                {
+                    outdoorAmbient = 1.0f;
+                }
+                breakdown.OutdoorAmbient = outdoorAmbient;
+            }
 
             // 1. Biome Baseline Maximum Temperature
             float baseTemp = breakdown.BiomeBaseTemp;
@@ -195,6 +421,11 @@ namespace VikingClimate.Features.Temperature
 
                 bool isSheltered = inShelter || ThermalGraphManager.Instance.IsPlayerSheltered;
                 breakdown.IsSheltered = isSheltered;
+                breakdown.EnclosureRatio = graphTelemetry.EnclosureRatio;
+                breakdown.DirectFlameWarmth = directWarmth;
+                breakdown.StructuralWarmth = structureWarmth;
+                breakdown.AverageStructureTemp = graphTelemetry.AveragePieceSurfaceTemp;
+                breakdown.ActiveFiresInLos = graphTelemetry.ActiveFiresCount;
 
                 if (isSheltered)
                 {
@@ -212,6 +443,8 @@ namespace VikingClimate.Features.Temperature
             float fireWarmthDelta = CalculateFireWarmth(player, pos, false, out string fireDesc, out List<string> fireSources);
             breakdown.IsSheltered = false;
             breakdown.IsDwellingHeatActive = false;
+            breakdown.DirectFlameWarmth = fireWarmthDelta;
+            breakdown.StructuralWarmth = 0.0f;
             breakdown.FireWarmthDelta = fireWarmthDelta;
             breakdown.FireSourceDescription = fireDesc;
             breakdown.FireSources = fireSources;

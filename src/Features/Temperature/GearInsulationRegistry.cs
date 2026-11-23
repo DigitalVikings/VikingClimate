@@ -126,7 +126,7 @@ namespace VikingClimate.Features.Temperature
                 var equipped = inventory.GetEquippedItems();
                 for (int i = 0; i < equipped.Count; i++)
                 {
-                    if (equipped[i]?.m_shared != null)
+                    if (equipped[i]?.m_shared != null && IsInsulatingArmorSlot(equipped[i].m_shared.m_itemType))
                     {
                         equippedSet.Add(equipped[i]);
                     }
@@ -179,9 +179,16 @@ namespace VikingClimate.Features.Temperature
             return Math.Min(0.90f, totalInsulation);
         }
 
+        public static bool IsInsulatingArmorSlot(ItemDrop.ItemData.ItemType itemType)
+            => itemType == ItemDrop.ItemData.ItemType.Helmet ||
+               itemType == ItemDrop.ItemData.ItemType.Chest ||
+               itemType == ItemDrop.ItemData.ItemType.Legs ||
+               itemType == ItemDrop.ItemData.ItemType.Shoulder;
+
         public static float GetItemInsulation(string name, ItemDrop.ItemData.SharedData? shared)
         {
             if (string.IsNullOrEmpty(name) && shared == null) return 0.0f;
+            if (shared != null && !IsInsulatingArmorSlot(shared.m_itemType)) return 0.0f;
 
             // 1. Direct dictionary check with provided name
             if (!string.IsNullOrEmpty(name))

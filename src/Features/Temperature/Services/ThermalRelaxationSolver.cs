@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using VikingClimate.Configuration;
@@ -173,17 +174,17 @@ namespace VikingClimate.Features.Temperature.Services
         }
 
         /// <summary>
-        /// Solves the true thermodynamic steady-state equilibrium for each connected building cluster.
-        /// Analytically computes the lumped steady-state equilibrium temperature (T_eq = T_ambient + Q_fire / AirLoss_total)
-        /// so cold huts immediately jump to their sustained operating warmth, then runs a gentle, bounded relaxation
-        /// pass (at most 5 iterations) to establish initial spatial conduction gradients without CPU spikes.
-        /// Used for one-shot equilibrium resets when the toggle is flipped or a fireplace is registered.
+        /// Solves the thermodynamic steady-state equilibrium for building structures.
+        /// Analytically computes the steady-state equilibrium temperature per homogeneous material sub-component
+        /// (T_eq = T_ambient + Q_fire / AirLoss_total), respecting contact resistance barriers between dissimilar materials,
+        /// then runs a gentle, bounded relaxation pass (at most 5 iterations) to establish initial spatial conduction
+        /// gradients without overriding insulation boundaries.
         /// </summary>
         public static void SolveSteadyStateEquilibrium(Dictionary<int, PieceThermalNode> nodes, float ambientTemp)
         {
             s_componentVisited.Clear();
 
-            // 1. Analytical Lumped Steady-State Equilibrium per Cluster
+            // 1. Analytical Lumped Steady-State Equilibrium per Homogeneous Material Sub-Cluster
             foreach (var kvp in nodes)
             {
                 PieceThermalNode start = kvp.Value;
@@ -193,6 +194,7 @@ namespace VikingClimate.Features.Temperature.Services
                 s_currentCluster.Clear();
                 s_clusterQueue.Clear();
 
+                string matType = start.MaterialType ?? "";
                 s_clusterQueue.Enqueue(start);
                 s_componentVisited.Add(start.InstanceId);
 
@@ -213,6 +215,12 @@ namespace VikingClimate.Features.Temperature.Services
                         PieceThermalNode neighbor = edge.Target;
                         if (neighbor.PieceRef != null && neighbor.PieceRef.gameObject != null)
                         {
+                            // Respect material boundary: do not traverse across dissimilar materials for lumped equilibrium
+                            if (!string.Equals(neighbor.MaterialType, matType, StringComparison.OrdinalIgnoreCase))
+                            {
+                                continue;
+                            }
+
                             if (s_componentVisited.Add(neighbor.InstanceId))
                             {
                                 s_clusterQueue.Enqueue(neighbor);
@@ -416,14 +424,14 @@ namespace VikingClimate.Features.Temperature.Services
         {
             float dt = ModConfig.StructuralRelaxationRate != null ? ModConfig.StructuralRelaxationRate.Value : 1.0f;
 
-            // Instant equilibrium debug mode: Gentle accelerated relaxation toward cluster equilibrium
-            // Runs a single accelerated relaxation step (3x rate) plus a gentle analytical bias (15% lerp) toward cluster equilibrium.
-            // Guarantees zero frame drops while reaching equilibrium smoothly and rapidly within seconds.
+            // Instant equilibrium debug mode: Gentle accelerated relaxation toward equilibrium
+            // Runs a single accelerated relaxation step (3x rate) plus a gentle analytical bias (15% lerp) toward homogeneous sub-cluster equilibrium.
+            // Guarantees zero frame drops while respecting contact resistance across dissimilar material boundaries.
             if (ModConfig.InstantGraphEquilibrium != null && ModConfig.InstantGraphEquilibrium.Value)
             {
                 StepStandardRelaxation(nodes, ambientTemp, ref lastMaxDeltaT, dtMultiplier: 3.0f);
 
-                // Gentle analytical bias toward lumped equilibrium for each cluster
+                // Gentle analytical bias toward lumped equilibrium for each homogeneous material sub-cluster
                 s_componentVisited.Clear();
                 foreach (var kvp in nodes)
                 {
@@ -434,6 +442,7 @@ namespace VikingClimate.Features.Temperature.Services
                     s_currentCluster.Clear();
                     s_clusterQueue.Clear();
 
+                    string matType = start.MaterialType ?? "";
                     s_clusterQueue.Enqueue(start);
                     s_componentVisited.Add(start.InstanceId);
 
@@ -454,6 +463,11 @@ namespace VikingClimate.Features.Temperature.Services
                             PieceThermalNode neighbor = edge.Target;
                             if (neighbor.PieceRef != null && neighbor.PieceRef.gameObject != null)
                             {
+                                if (!string.Equals(neighbor.MaterialType, matType, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    continue;
+                                }
+
                                 if (s_componentVisited.Add(neighbor.InstanceId))
                                 {
                                     s_clusterQueue.Enqueue(neighbor);
@@ -468,7 +482,7 @@ namespace VikingClimate.Features.Temperature.Services
                         for (int i = 0; i < s_currentCluster.Count; i++)
                         {
                             var p = s_currentCluster[i];
-                            // Smooth 15% nudge per tick toward cluster equilibrium baseline
+                            // Smooth 15% nudge per tick toward sub-cluster equilibrium baseline
                             p.CurrentTemperature = Mathf.Lerp(p.CurrentTemperature, clusterTarget, 0.15f);
                         }
                     }

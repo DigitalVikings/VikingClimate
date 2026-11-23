@@ -4,6 +4,8 @@ using HarmonyLib;
 using VikingClimate.Configuration;
 using VikingClimate.Core;
 using VikingClimate.Features.Temperature;
+using VikingClimate.UI;
+using VikingLib.UI.Hub;
 
 namespace VikingClimate
 {
@@ -15,7 +17,7 @@ namespace VikingClimate
     {
         public const string ModGuid = "com.digitalvikings.vikingclimate";
         public const string ModName = "VikingClimate";
-        public const string ModVersion = "0.3.0";
+        public const string ModVersion = "0.4.0";
 
         public static VikingClimatePlugin Instance { get; private set; } = null!;
         internal static ManualLogSource Log = null!;
@@ -36,6 +38,9 @@ namespace VikingClimate
             // Initialize survival manager and temperature system
             SurvivalManager.Init();
             TemperatureSystem.Init();
+
+            // Register Climate tab with VikingHub
+            VikingHubRegistry.RegisterTab(new ClimateHubTab());
 
             // Apply Harmony patches
             _harmony = new Harmony(ModGuid);
@@ -83,6 +88,7 @@ namespace VikingClimate
 
         private void OnDestroy()
         {
+            VikingHubRegistry.UnregisterTab(ClimateHubTab.TabId);
             _harmony?.UnpatchSelf();
         }
     }

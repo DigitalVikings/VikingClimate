@@ -74,6 +74,7 @@ namespace VikingClimate.Configuration
         public static ConfigEntry<float> ShelterAirLossBeta { get; private set; } = null!;
         public static ConfigEntry<OfflineThermalMode> OfflineThermalBehavior { get; private set; } = null!;
         public static ConfigEntry<float> StructuralRelaxationRate { get; private set; } = null!;
+        public static ConfigEntry<float> DissimilarMaterialJointConductanceRatio { get; private set; } = null!;
 
         // 09 - Heat Raycasting
         public static ConfigEntry<bool> EnableHeatRaycasting { get; private set; } = null!;
@@ -771,6 +772,17 @@ namespace VikingClimate.Configuration
                 isAdminOnly: true,
                 legacySection: "09 - Structural Thermal Graph",
                 legacySection2: "6 - Structural Thermal Graph"
+            );
+
+            DissimilarMaterialJointConductanceRatio = Bind(
+                config,
+                "08 - Structural Thermal Graph",
+                "DissimilarMaterialJointConductanceRatio",
+                0.05f,
+                "Fraction (0.0 to 1.0) of normal joint conductivity retained across boundaries between dissimilar materials (e.g. wood to stone). Default 0.05 represents a 95% thermal contact barrier.",
+                order: 55,
+                new AcceptableValueRange<float>(0.0f, 1.0f),
+                isAdminOnly: true
             );
 
             // 09 - Heat Raycasting

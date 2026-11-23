@@ -20,7 +20,18 @@ namespace VikingClimate.Features.Temperature
                 {
                     float k1 = Source.MaterialConductivity;
                     float k2 = Target.MaterialConductivity;
-                    return (2.0f * k1 * k2) / Mathf.Max(0.001f, k1 + k2);
+                    float baseK = (2.0f * k1 * k2) / Mathf.Max(0.001f, k1 + k2);
+
+                    // If connecting dissimilar materials (e.g. wood to stone), apply contact resistance reduction ratio
+                    if (!string.Equals(Source.MaterialType, Target.MaterialType, StringComparison.OrdinalIgnoreCase))
+                    {
+                        float ratio = Configuration.ModConfig.DissimilarMaterialJointConductanceRatio != null
+                            ? Configuration.ModConfig.DissimilarMaterialJointConductanceRatio.Value
+                            : 0.05f;
+                        baseK *= Mathf.Clamp01(ratio);
+                    }
+
+                    return baseK;
                 }
                 return m_fallbackK;
             }

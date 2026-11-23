@@ -28,6 +28,11 @@ namespace VikingClimate.Core
         public float SubterraneanOffset;
         public float RawWindSpeedKmh;
         public bool IsDwellingHeatActive;
+        public float EnclosureRatio;
+        public float DirectFlameWarmth;
+        public float StructuralWarmth;
+        public float AverageStructureTemp;
+        public int ActiveFiresInLos;
         public VikingClimate.Features.Temperature.DwellingThermalProfile? DwellingProfile;
     }
 
@@ -117,6 +122,16 @@ namespace VikingClimate.Core
         /// Whether frost resistance mead is currently active.
         /// </summary>
         public bool HasFrostMead { get; set; } = false;
+
+        /// <summary>
+        /// Whether Thor Tier 3 (Stormcaller's Aegis) from VikingWards is currently shielding the player.
+        /// </summary>
+        public bool IsThorAegisProtected { get; set; } = false;
+
+        /// <summary>
+        /// Active thermal status tier ID (null when within Comfort Equilibrium).
+        /// </summary>
+        public string? ActiveThermalTierId { get; set; } = null;
 
         /// <summary>
         /// Detailed itemization of all positive and negative ambient contributors.
